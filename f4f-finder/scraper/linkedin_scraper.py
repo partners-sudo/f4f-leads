@@ -5,6 +5,8 @@ from utils.logger import logger
 import os
 from dotenv import load_dotenv
 import json
+import re
+from urllib.parse import urlparse
 from pathlib import Path
 
 load_dotenv()
@@ -38,8 +40,8 @@ class LinkedInScraper(BaseScraper):
     async def save_browser_state(self, context):
         """Save browser state (cookies/session) for future use."""
         try:
-            # storage_state() returns a dict synchronously
-            state = context.storage_state()
+            # storage_state() is async in Playwright
+            state = await context.storage_state()
             with open(STATE_FILE, 'w') as f:
                 json.dump(state, f)
             logger.info("Saved LinkedIn browser state for future use")
@@ -336,6 +338,283 @@ class LinkedInScraper(BaseScraper):
             logger.error(f"Error during LinkedIn login: {e}")
             return False
 
+    def parse_country(self, text):
+        """Parse country from headquarters text."""
+        if not text:
+            return None
+        
+        text_lower = text.lower()
+        
+        # Common country patterns
+        country_patterns = {
+            "US": ["united states", "usa", "u.s.a", "u.s.", "america"],
+            "UK": ["united kingdom", "u.k.", "uk", "england", "scotland", "wales"],
+            "CA": ["canada"],
+            "AU": ["australia"],
+            "DE": ["germany", "deutschland"],
+            "FR": ["france"],
+            "IT": ["italy", "italia"],
+            "ES": ["spain", "españa"],
+            "NL": ["netherlands", "holland"],
+            "BE": ["belgium"],
+            "CH": ["switzerland"],
+            "AT": ["austria"],
+            "SE": ["sweden"],
+            "NO": ["norway"],
+            "DK": ["denmark"],
+            "FI": ["finland"],
+            "PL": ["poland"],
+            "IE": ["ireland"],
+            "PT": ["portugal"],
+            "GR": ["greece"],
+            "CZ": ["czech republic", "czechia"],
+            "HU": ["hungary"],
+            "RO": ["romania"],
+            "BG": ["bulgaria"],
+        }
+        
+        for country_code, patterns in country_patterns.items():
+            for pattern in patterns:
+                if pattern in text_lower:
+                    return country_code
+        
+        # If no match, try to extract last part (often country)
+        parts = text.split(",")
+        if len(parts) > 1:
+            last_part = parts[-1].strip()
+            # If it's a short string, might be country
+            if len(last_part) <= 30:
+                return last_part
+        
+        return None
+    
+    def parse_region(self, text):
+        """Parse region from headquarters text."""
+        if not text:
+            return None
+        
+        # Extract region (usually city, state/province, country)
+        # Return the full location string as region
+        parts = text.split(",")
+        if len(parts) >= 2:
+            # Return everything except the last part (country) as region
+            region = ",".join(parts[:-1]).strip()
+            return region if region else None
+        
+        return text.strip() if text.strip() else None
+
+    async def extract_company_details(self, page, company_url):
+        """Extract detailed company information from a LinkedIn company /about/ page."""
+        company_data = {}
+        
+        try:
+            # Ensure we visit the /about/ page specifically
+            if not company_url.endswith("/about/"):
+                # Remove trailing slash if present, then add /about/
+                company_url = company_url.rstrip("/") + "/about/"
+            
+            logger.info(f"Visiting company /about/ page: {company_url}")
+            await page.goto(company_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
+            
+            # Wait for the about page content to load
+            try:
+                # Wait for common about page elements
+                await page.wait_for_selector(
+                    "h1, div.org-about-us-organization-description, section[data-test-id='about-section'], dt, dd",
+                    timeout=10000
+                )
+            except Exception as e:
+                logger.debug(f"Timeout waiting for about page elements: {e}")
+            
+            # Check if we're blocked or redirected
+            current_url = page.url
+            logger.info(f"Current URL after navigation: {current_url}")
+            
+            # Verify we're on the /about/ page
+            if "/about/" not in current_url:
+                logger.warning(f"Not on /about/ page! Current URL: {current_url}, expected: {company_url}")
+                # Try to navigate to /about/ again
+                if "/company/" in current_url:
+                    about_url = current_url.rstrip("/") + "/about/"
+                    logger.info(f"Attempting to navigate to /about/ page: {about_url}")
+                    await page.goto(about_url, wait_until="domcontentloaded", timeout=30000)
+                    await page.wait_for_timeout(3000)
+                    current_url = page.url
+                    logger.info(f"URL after retry: {current_url}")
+            
+            if "login" in current_url.lower() or "authwall" in current_url.lower():
+                logger.warning(f"Redirected to login/authwall when accessing {company_url}")
+                return company_data
+            
+            # Extract company name from page header (h1)
+            name_selectors = [
+                "h1.org-top-card-summary__title",
+                "h1.text-heading-xlarge",
+                "h1[data-test-id='org-name']",
+                "h1.org-top-card-summary-info__primary-content",
+                "h1"
+            ]
+            for selector in name_selectors:
+                try:
+                    name_el = await page.query_selector(selector)
+                    if name_el:
+                        company_name = (await name_el.inner_text()).strip()
+                        if company_name:
+                            company_data["name"] = company_name
+                            break
+                except:
+                    continue
+            
+            # Extract company website/domain from About section
+            # The website is usually in a link in the About section
+            website_selectors = [
+                "a[href^='http']:not([href*='linkedin.com']):not([href*='facebook.com']):not([href*='twitter.com'])",
+                "a.org-about-us-organization-description__website",
+                "a[data-test-id='org-website']",
+                "div.org-about-us-organization-description a[href^='http']",
+                "section[data-test-id='about-section'] a[href^='http']"
+            ]
+            for selector in website_selectors:
+                try:
+                    website_els = await page.query_selector_all(selector)
+                    for website_el in website_els:
+                        website = await website_el.get_attribute("href")
+                        if website and not any(domain in website.lower() for domain in ["linkedin.com", "facebook.com", "twitter.com", "instagram.com"]):
+                            # Clean up the URL and extract domain
+                            website = website.strip()
+                            if website.startswith("//"):
+                                website = "https:" + website
+                            elif not website.startswith("http"):
+                                website = "https://" + website
+                            
+                            # Extract domain from URL
+                            try:
+                                parsed = urlparse(website)
+                                domain = parsed.netloc or parsed.path
+                                # Remove www. prefix
+                                if domain.startswith("www."):
+                                    domain = domain[4:]
+                                company_data["domain"] = domain
+                                company_data["website"] = website  # Keep full URL for reference
+                                break
+                            except:
+                                company_data["domain"] = website
+                                company_data["website"] = website
+                                break
+                    if company_data.get("domain"):
+                        break
+                except:
+                    continue
+            
+            # Extract headquarters information (for country and region)
+            headquarters_text = None
+            
+            # Try multiple strategies to find headquarters
+            try:
+                # Strategy 1: Look for definition list (dt/dd) pattern
+                dt_elements = await page.query_selector_all("dt")
+                for dt_el in dt_elements:
+                    try:
+                        dt_text = (await dt_el.inner_text()).strip().lower()
+                        if "headquarters" in dt_text:
+                            # Get the next dd element (sibling)
+                            dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
+                            if dd_el and dd_el.as_element():
+                                headquarters_text = (await dd_el.as_element().inner_text()).strip()
+                                if headquarters_text:
+                                    break
+                    except:
+                        continue
+                
+                # Strategy 2: Look for data-test-id attribute
+                if not headquarters_text:
+                    hq_el = await page.query_selector("div[data-test-id='org-headquarters'], span[data-test-id='org-headquarters']")
+                    if hq_el:
+                        headquarters_text = (await hq_el.inner_text()).strip()
+                
+                # Strategy 3: Search by text content pattern
+                if not headquarters_text:
+                    page_text = await page.evaluate("() => document.body.innerText")
+                    if "Headquarters" in page_text:
+                        # Use JavaScript to find the element containing headquarters
+                        hq_text = await page.evaluate("""
+                            () => {
+                                const allElements = document.querySelectorAll('dt, dd, div, span, p, li');
+                                for (let el of allElements) {
+                                    const text = el.textContent || el.innerText || '';
+                                    if (text.toLowerCase().includes('headquarters')) {
+                                        // Try to get the value part (usually after "Headquarters")
+                                        const parts = text.split(/headquarters/i);
+                                        if (parts.length > 1) {
+                                            const value = parts[1].trim().split(/[\\n\\r]/)[0].trim();
+                                            if (value && value.length > 3 && value.length < 200) {
+                                                return value;
+                                            }
+                                        }
+                                        // Or get the next sibling
+                                        const nextSibling = el.nextElementSibling;
+                                        if (nextSibling) {
+                                            const siblingText = (nextSibling.textContent || nextSibling.innerText || '').trim();
+                                            if (siblingText && siblingText.length > 3 && siblingText.length < 200) {
+                                                return siblingText;
+                                            }
+                                        }
+                                    }
+                                }
+                                return null;
+                            }
+                        """)
+                        if hq_text:
+                            headquarters_text = hq_text
+            except Exception as e:
+                logger.debug(f"Error finding headquarters: {e}")
+            
+            # Parse country and region from headquarters
+            if headquarters_text:
+                company_data["country"] = self.parse_country(headquarters_text)
+                company_data["region"] = self.parse_region(headquarters_text)
+                company_data["headquarters"] = headquarters_text  # Keep full text for reference
+            
+            # Extract company type (usually "Company size" or "Type" field)
+            # This maps to the "type" field in the schema
+            type_selectors = [
+                "dt:has-text('Company size') + dd",
+                "dt:has-text('Type') + dd",
+                "div[data-test-id='org-type']",
+            ]
+            for selector in type_selectors:
+                try:
+                    type_el = await page.query_selector(selector)
+                    if type_el:
+                        company_type = (await type_el.inner_text()).strip()
+                        if company_type:
+                            company_data["type"] = company_type
+                            break
+                except:
+                    continue
+            
+            # If no type found, default to "brand" as suggested
+            if not company_data.get("type"):
+                company_data["type"] = "brand"
+            
+            # Set source
+            company_data["source"] = "linkedin"
+            
+            # Set brand_focus from keyword (will be set in the calling function)
+            # This will be added when creating the company record
+            
+            # Extract LinkedIn URL (base URL without /about/)
+            base_url = company_url.replace("/about/", "").rstrip("/")
+            company_data["linkedin_url"] = base_url
+            
+            logger.debug(f"Extracted details for company: {company_data.get('name', 'Unknown')} - Domain: {company_data.get('domain', 'N/A')}, Country: {company_data.get('country', 'N/A')}")
+            
+        except Exception as e:
+            logger.error(f"Error extracting company details from {company_url}: {e}")
+        
+        return company_data
+
     async def extract_contacts(self):
         async with async_playwright() as p:
             # Use a more realistic browser context to avoid detection
@@ -410,106 +689,262 @@ class LinkedInScraper(BaseScraper):
             
             results = []
 
-            # Try multiple selector strategies for LinkedIn search results
-            # LinkedIn's structure can vary, so we try different selectors
-            selectors_to_try = [
-                "li.reusable-search__result-container",  # Most common LinkedIn search result container
-                "div.entity-result",  # Alternative container
-                "div.entity-result__content",  # Content wrapper
-                "div.search-result__wrapper",  # Another alternative
-            ]
+            # Find all company links directly from the page
+            # LinkedIn company search results contain links with "/company/" in the href
+            logger.info("Searching for company links in search results...")
             
-            company_cards = []
-            for selector in selectors_to_try:
-                company_cards = await page.query_selector_all(selector)
-                if company_cards:
-                    logger.info(f"Found {len(company_cards)} company cards using selector: {selector}")
-                    break
+            # Strategy 1: Find all links that contain "/company/" in their href
+            all_links = await page.query_selector_all("a[href*='/company/']")
+            logger.info(f"Found {len(all_links)} links containing '/company/'")
             
-            if not company_cards:
-                logger.warning("No company cards found. Debugging page content...")
-                # Log page title and some content for debugging
-                page_title = await page.title()
-                logger.info(f"Page title: {page_title}")
-                
-                # Check what's actually on the page
-                page_content = await page.content()
-                logger.debug(f"Page HTML length: {len(page_content)}")
-                
-                # Try to find any result-like elements
-                all_divs = await page.query_selector_all("div")
-                logger.info(f"Total divs on page: {len(all_divs)}")
-                
-                # Look for text that might indicate results
-                body_text = await page.evaluate("() => document.body.innerText")
-                logger.info(f"Page body text preview (first 1000 chars):\n{body_text[:1000]}")
-                
-                # Check for common LinkedIn classes
-                search_result_indicators = [
-                    "entity-result",
-                    "search-result",
-                    "reusable-search",
-                    "results-list"
-                ]
-                for indicator in search_result_indicators:
-                    elements = await page.query_selector_all(f"[class*='{indicator}']")
-                    if elements:
-                        logger.info(f"Found {len(elements)} elements with class containing '{indicator}'")
+            # Extract unique company URLs
+            company_urls = []
+            seen_urls = set()
             
-            for card in company_cards:
+            for link in all_links:
                 try:
-                    # Try multiple selectors for company name
-                    company_name = None
-                    name_selectors = [
-                        "span.entity-result__title-text",
-                        "a.app-aware-link span",
-                        "div.entity-result__title-text a span",
-                        "h3.search-result__title a span",
-                    ]
-                    for name_sel in name_selectors:
-                        company_name_el = await card.query_selector(name_sel)
-                        if company_name_el:
-                            company_name = (await company_name_el.inner_text()).strip()
-                            if company_name:
-                                break
+                    href = await link.get_attribute("href")
+                    if not href:
+                        continue
                     
-                    # Get company link
-                    domain_el = await card.query_selector("a.app-aware-link, a.entity-result__title-link")
-                    domain_url = None
-                    if domain_el:
-                        domain_url = await domain_el.get_attribute("href")
-                        if domain_url and not domain_url.startswith("http"):
-                            domain_url = f"https://www.linkedin.com{domain_url}"
+                    # Clean up the URL
+                    if not href.startswith("http"):
+                        href = f"https://www.linkedin.com{href}"
                     
-                    # Get location/region
-                    location_el = await card.query_selector(
-                        "div.entity-result__primary-subtitle, "
-                        "div.search-result__snippets, "
-                        "span.entity-result__secondary-subtitle"
-                    )
-                    region = None
-                    if location_el:
-                        region = (await location_el.inner_text()).strip()
-
-                    # Extract employees (simplified placeholder)
-                    employee_name = None
-                    title = None
-                    linkedin_url = domain_url  # Use the company link as LinkedIn URL
-
-                    if company_name:  # Only add if we found at least a company name
-                        results.append({
-                            "company_name": company_name,
-                            "domain": domain_url,
-                            "region": region,
-                            "contact_name": employee_name,
-                            "title": title,
-                            "linkedin_url": linkedin_url,
-                            "source": "linkedin"
-                        })
-                        logger.debug(f"Extracted company: {company_name} (region: {region})")
+                    # Extract the base company URL (remove query params, fragments, etc.)
+                    # e.g., "https://www.linkedin.com/company/xyz-ltd/?originalSubdomain=uk" -> "https://www.linkedin.com/company/xyz-ltd"
+                    if "/company/" in href:
+                        # Get the base URL up to the company slug
+                        parts = href.split("/company/")
+                        if len(parts) > 1:
+                            company_slug = parts[1].split("?")[0].split("#")[0].rstrip("/")
+                            base_url = f"https://www.linkedin.com/company/{company_slug}"
+                            
+                            if base_url not in seen_urls:
+                                seen_urls.add(base_url)
+                                
+                                # Try to get company name from the link or nearby elements
+                                company_name = None
+                                try:
+                                    # Try to get text from the link itself
+                                    link_text = await link.inner_text()
+                                    if link_text and link_text.strip():
+                                        company_name = link_text.strip()
+                                    
+                                    # If no text in link, try to find name in parent/sibling elements
+                                    if not company_name:
+                                        parent = await link.evaluate_handle("el => el.closest('li, div[class*=\"result\"], div[class*=\"entity\"]')")
+                                        if parent and parent.as_element():
+                                            parent_text = await parent.as_element().inner_text()
+                                            # Extract first meaningful line (usually company name)
+                                            lines = [l.strip() for l in parent_text.split("\n") if l.strip()]
+                                            if lines:
+                                                company_name = lines[0]
+                                except Exception as e:
+                                    logger.debug(f"Error extracting company name: {e}")
+                                
+                                # Get region/location if available
+                                region = None
+                                try:
+                                    # Look for location in the same card
+                                    card = await link.evaluate_handle("el => el.closest('li, div[class*=\"result\"], div[class*=\"entity\"]')")
+                                    if card and card.as_element():
+                                        card_text = await card.as_element().inner_text()
+                                        # Look for common location patterns
+                                        lines = [l.strip() for l in card_text.split("\n") if l.strip()]
+                                        for line in lines[1:]:  # Skip first line (company name)
+                                            # Location usually contains commas or common location keywords
+                                            if "," in line or any(keyword in line.lower() for keyword in ["followers", "employees", "location"]):
+                                                # Skip if it's a number or follower count
+                                                if not re.match(r'^\d+', line) and "follower" not in line.lower():
+                                                    region = line
+                                                    break
+                                except Exception as e:
+                                    logger.debug(f"Error extracting region: {e}")
+                                
+                                if company_name:
+                                    company_urls.append({
+                                        "company_name": company_name,
+                                        "linkedin_url": base_url,
+                                        "region": region
+                                    })
+                                    logger.debug(f"Found company: {company_name} - {base_url}")
                 except Exception as e:
-                    logger.error(f"Error extracting LinkedIn card: {e}")
+                    logger.debug(f"Error processing company link: {e}")
+                    continue
+            
+            # If we didn't find companies via links, try the card-based approach as fallback
+            if not company_urls:
+                logger.info("Trying fallback: card-based extraction...")
+                selectors_to_try = [
+                    "li.reusable-search__result-container",
+                    "div.entity-result",
+                    "div.entity-result__content",
+                    "div.search-result__wrapper",
+                ]
+                
+                company_cards = []
+                for selector in selectors_to_try:
+                    company_cards = await page.query_selector_all(selector)
+                    if company_cards:
+                        logger.info(f"Found {len(company_cards)} company cards using selector: {selector}")
+                        break
+                
+                for card in company_cards:
+                    try:
+                        # Find all links in the card
+                        card_links = await card.query_selector_all("a[href*='/company/']")
+                        for link in card_links:
+                            href = await link.get_attribute("href")
+                            if href and "/company/" in href:
+                                if not href.startswith("http"):
+                                    href = f"https://www.linkedin.com{href}"
+                                
+                                # Extract base URL
+                                parts = href.split("/company/")
+                                if len(parts) > 1:
+                                    company_slug = parts[1].split("?")[0].split("#")[0].rstrip("/")
+                                    base_url = f"https://www.linkedin.com/company/{company_slug}"
+                                    
+                                    if base_url not in seen_urls:
+                                        seen_urls.add(base_url)
+                                        
+                                        # Get company name
+                                        company_name = None
+                                        name_selectors = [
+                                            "span.entity-result__title-text",
+                                            "a.app-aware-link span",
+                                            "div.entity-result__title-text a span",
+                                            "h3.search-result__title a span",
+                                        ]
+                                        for name_sel in name_selectors:
+                                            name_el = await card.query_selector(name_sel)
+                                            if name_el:
+                                                company_name = (await name_el.inner_text()).strip()
+                                                if company_name:
+                                                    break
+                                        
+                                        # Get region
+                                        region = None
+                                        location_el = await card.query_selector(
+                                            "div.entity-result__primary-subtitle, "
+                                            "div.search-result__snippets, "
+                                            "span.entity-result__secondary-subtitle"
+                                        )
+                                        if location_el:
+                                            region = (await location_el.inner_text()).strip()
+                                        
+                                        if company_name:
+                                            company_urls.append({
+                                                "company_name": company_name,
+                                                "linkedin_url": base_url,
+                                                "region": region
+                                            })
+                                            logger.debug(f"Found company (fallback): {company_name} - {base_url}")
+                    except Exception as e:
+                        logger.debug(f"Error extracting from card: {e}")
+                        continue
 
-            logger.info(f"Extracted {len(results)} contacts from LinkedIn search for '{self.keyword}'")
+            logger.info(f"Found {len(company_urls)} companies. Now extracting detailed information...")
+            
+            # Now visit each company profile page to get detailed information
+            for idx, company_info in enumerate(company_urls, 1):
+                try:
+                    logger.info(f"Processing company {idx}/{len(company_urls)}: {company_info['company_name']}")
+                    
+                    # Extract detailed company information from /about/ page
+                    detailed_data = await self.extract_company_details(page, company_info['linkedin_url'])
+                    
+                    # Build company record with proper field mapping
+                    company_record = {
+                        "name": detailed_data.get("name") or company_info.get("company_name"),
+                        "source": detailed_data.get("source", "linkedin"),
+                        "brand_focus": self.keyword  # Set brand_focus from search keyword
+                    }
+                    
+                    # Add domain (extracted from website in extract_company_details)
+                    if detailed_data.get("domain"):
+                        company_record["domain"] = detailed_data["domain"]
+                    else:
+                        # Fallback: try to extract from LinkedIn URL or use placeholder
+                        linkedin_url = company_info.get("linkedin_url") or detailed_data.get("linkedin_url")
+                        if linkedin_url and "company" in linkedin_url:
+                            # Try to extract company slug from LinkedIn URL as fallback
+                            try:
+                                parts = linkedin_url.split("/")
+                                company_slug = [p for p in parts if p and p != "company"][-1] if "company" in parts else None
+                                if company_slug:
+                                    company_record["domain"] = f"{company_slug}.linkedin.com"
+                                else:
+                                    company_record["domain"] = None  # Will be enriched later
+                            except:
+                                company_record["domain"] = None
+                        else:
+                            company_record["domain"] = None
+                    
+                    # Add country (parsed from headquarters)
+                    if detailed_data.get("country"):
+                        company_record["country"] = detailed_data["country"]
+                    
+                    # Add region (parsed from headquarters, or fallback to search result region)
+                    if detailed_data.get("region"):
+                        company_record["region"] = detailed_data["region"]
+                    elif company_info.get("region"):
+                        company_record["region"] = company_info.get("region")
+                    
+                    # Add type (from detailed data, defaults to "brand" if not found)
+                    if detailed_data.get("type"):
+                        company_record["type"] = detailed_data["type"]
+                    else:
+                        company_record["type"] = "brand"
+                    
+                    # Create contact record (will be linked to company via company_id in task)
+                    contact_record = {
+                        "linkedin_url": company_info.get("linkedin_url") or detailed_data.get("linkedin_url"),
+                        "name": None,
+                        "position": None,
+                        "email": None
+                    }
+                    
+                    # Store both company and contact data together
+                    results.append({
+                        "company": company_record,
+                        "contact": contact_record,
+                        # Keep additional metadata for logging
+                        "_metadata": {
+                            "headquarters": detailed_data.get("headquarters"),
+                            "website": detailed_data.get("website"),
+                            "linkedin_url": detailed_data.get("linkedin_url")
+                        }
+                    })
+                    logger.info(f"✓ Extracted: {company_record['name']} - Domain: {company_record.get('domain', 'N/A')}, Country: {company_record.get('country', 'N/A')}, Region: {company_record.get('region', 'N/A')}, Type: {company_record.get('type', 'N/A')}")
+                    
+                    # Add a small delay between requests to avoid rate limiting
+                    await page.wait_for_timeout(2000)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing company {company_info.get('company_name', 'Unknown')}: {e}")
+                    # Still add basic info even if detailed extraction fails
+                    company_record = {
+                        "name": company_info.get("company_name"),
+                        "domain": None,  # Will be enriched later
+                        "region": company_info.get("region"),
+                        "source": "linkedin",
+                        "type": "brand",
+                        "brand_focus": self.keyword
+                    }
+                    contact_record = {
+                        "linkedin_url": company_info.get("linkedin_url"),
+                        "name": None,
+                        "position": None,
+                        "email": None
+                    }
+                    results.append({
+                        "company": company_record,
+                        "contact": contact_record,
+                        "_metadata": {}
+                    })
+
+            logger.info(f"Extracted {len(results)} companies with detailed information from LinkedIn search for '{self.keyword}'")
             await browser.close()
             return results

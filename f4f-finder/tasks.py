@@ -13,6 +13,8 @@ from enrichment.email_verification import verify_email
 
 from enrichment.clearbit_integration import enrich_company
 
+from utils.logger import logger
+
 
 def run_async(coro):
     """Helper function to run async code in Celery tasks, handling event loop creation."""
@@ -53,10 +55,77 @@ def scrape_competitor_partners(self, url, source="competitor"):
 def scrape_linkedin_companies(self, keyword):
     try:
         scraper = LinkedInScraper(keyword)
-        contacts = run_async(scraper.extract_contacts())
-        for contact in contacts:
-            sb.table('contacts').upsert(contact).execute()
-        return {'count': len(contacts)}
+        results = run_async(scraper.extract_contacts())
+        
+        companies_saved = 0
+        contacts_saved = 0
+        
+        for result in results:
+            try:
+                # Extract company and contact data
+                company_data = result.get("company", {})
+                contact_data = result.get("contact", {})
+                
+                # Enrich company data if domain is available
+                # This will fill in missing fields like domain, country, region if LinkedIn didn't provide them
+                if company_data.get("domain"):
+                    enriched = enrich_company(company_data.get("domain"))
+                    # Update company_data with enriched data (only if not already present)
+                    for key, value in enriched.items():
+                        if value and not company_data.get(key):
+                            company_data[key] = value
+                
+                # Step 1: Save/upsert company (domain is unique, so upsert will work)
+                if company_data.get("name"):
+                    # If domain is missing, try to enrich by company name
+                    if not company_data.get("domain"):
+                        logger.warning(f"Missing domain for {company_data.get('name')}, will try enrichment by name")
+                        # Note: Current enrich_company only works with domain, but this is a placeholder
+                        # for future enhancement where you might enrich by company name
+                    
+                    # Upsert company by domain (unique constraint) or name if domain is missing
+                    # Supabase automatically handles upsert on unique fields
+                    company_response = sb.table('companies').upsert(company_data).execute()
+                    
+                    # Get the company_id from the response
+                    # Upsert returns the inserted/updated record(s)
+                    company_id = None
+                    if company_response.data and len(company_response.data) > 0:
+                        company_id = company_response.data[0].get('id')
+                        companies_saved += 1
+                    else:
+                        # If upsert didn't return data, fetch by domain or name to get the id
+                        if company_data.get('domain'):
+                            fetch_response = sb.table('companies').select('id').eq('domain', company_data['domain']).limit(1).execute()
+                        else:
+                            fetch_response = sb.table('companies').select('id').eq('name', company_data['name']).limit(1).execute()
+                        
+                        if fetch_response.data and len(fetch_response.data) > 0:
+                            company_id = fetch_response.data[0].get('id')
+                            companies_saved += 1
+                        else:
+                            logger.warning(f"Could not get company_id for: {company_data.get('name')}")
+                            continue
+                    
+                    # Step 2: Save contact with company_id reference
+                    if company_id:
+                        contact_data['company_id'] = company_id
+                        # Only save contact if there's meaningful data (linkedin_url or phone)
+                        if contact_data.get('linkedin_url') or contact_data.get('phone'):
+                            sb.table('contacts').upsert(contact_data).execute()
+                            contacts_saved += 1
+                else:
+                    logger.warning(f"Skipping record - missing name: {company_data}")
+                    
+            except Exception as e:
+                logger.error(f"Error saving company/contact record: {e}")
+                continue
+        
+        return {
+            'companies_saved': companies_saved,
+            'contacts_saved': contacts_saved,
+            'total_processed': len(results)
+        }
     except Exception as e:
         raise self.retry(exc=e, countdown=60)
 
