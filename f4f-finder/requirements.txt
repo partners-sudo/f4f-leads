@@ -1,0 +1,12 @@
+playwright
+supabase
+psycopg2-binary
+pydantic
+celery
+redis
+requests
+beautifulsoup4
+python-dotenv
+openai
+httpx
+
