@@ -15,6 +15,26 @@ from enrichment.clearbit_integration import enrich_company
 
 from utils.logger import logger
 
+# Valid fields for companies table (excluding auto-generated fields like id, created_at, updated_at)
+VALID_COMPANY_FIELDS = {
+    'name', 'domain', 'country', 'region', 'type', 'source', 
+    'brand_focus', 'status', 'freshness_timestamp'
+}
+
+# Valid fields for contacts table (excluding auto-generated fields like id, created_at, updated_at)
+VALID_CONTACT_FIELDS = {
+    'company_id', 'name', 'email', 'phone', 'title', 
+    'linkedin_url', 'confidence_score', 'last_validated'
+}
+
+def filter_company_data(data):
+    """Filter company data to only include valid schema fields."""
+    return {k: v for k, v in data.items() if k in VALID_COMPANY_FIELDS}
+
+def filter_contact_data(data):
+    """Filter contact data to only include valid schema fields."""
+    return {k: v for k, v in data.items() if k in VALID_CONTACT_FIELDS}
+
 
 def run_async(coro):
     """Helper function to run async code in Celery tasks, handling event loop creation."""
@@ -46,7 +66,9 @@ def scrape_competitor_partners(self, url, source="competitor"):
             c['email'] = verify_email(c.get('email'))
             enriched = enrich_company(c.get('domain'))
             c.update(enriched)
-            sb.table('companies').upsert(c).execute()
+            # Filter to only include valid schema fields
+            filtered_company = filter_company_data(c)
+            sb.table('companies').upsert(filtered_company).execute()
         return {'count': len(companies)}
     except Exception as e:
         raise self.retry(exc=e, countdown=60)
@@ -83,9 +105,12 @@ def scrape_linkedin_companies(self, keyword):
                         # Note: Current enrich_company only works with domain, but this is a placeholder
                         # for future enhancement where you might enrich by company name
                     
+                    # Filter to only include valid schema fields before upserting
+                    filtered_company_data = filter_company_data(company_data)
+                    
                     # Upsert company by domain (unique constraint) or name if domain is missing
                     # Supabase automatically handles upsert on unique fields
-                    company_response = sb.table('companies').upsert(company_data).execute()
+                    company_response = sb.table('companies').upsert(filtered_company_data).execute()
                     
                     # Get the company_id from the response
                     # Upsert returns the inserted/updated record(s)
@@ -112,7 +137,9 @@ def scrape_linkedin_companies(self, keyword):
                         contact_data['company_id'] = company_id
                         # Only save contact if there's meaningful data (linkedin_url or phone)
                         if contact_data.get('linkedin_url') or contact_data.get('phone'):
-                            sb.table('contacts').upsert(contact_data).execute()
+                            # Filter to only include valid schema fields
+                            filtered_contact_data = filter_contact_data(contact_data)
+                            sb.table('contacts').upsert(filtered_contact_data).execute()
                             contacts_saved += 1
                 else:
                     logger.warning(f"Skipping record - missing name: {company_data}")
@@ -135,7 +162,9 @@ def scrape_marketplaces(self, marketplace_url):
         scraper = MarketplaceScraper(marketplace_url)
         companies = run_async(scraper.extract_listings())
         for c in companies:
-            sb.table('companies').upsert(c).execute()
+            # Filter to only include valid schema fields
+            filtered_company = filter_company_data(c)
+            sb.table('companies').upsert(filtered_company).execute()
         return {'count': len(companies)}
     except Exception as e:
         raise self.retry(exc=e, countdown=60)

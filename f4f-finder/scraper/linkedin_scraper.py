@@ -338,6 +338,173 @@ class LinkedInScraper(BaseScraper):
             logger.error(f"Error during LinkedIn login: {e}")
             return False
 
+    def extract_phone_from_text(self, text):
+        """Extract phone number from text that may contain labels like 'Phone number is ...'.
+        
+        Returns just the phone number part, or None if no valid phone number found.
+        Handles cases like:
+        - "Phone number is 00 44 7766856276" -> "00 44 7766856276"
+        - "Phonenumberis00447766856276" -> "00447766856276"
+        - "+44 7766 856276" -> "+44 7766 856276"
+        """
+        if not text:
+            return None
+        
+        # First, try to find phone number patterns directly (most reliable)
+        # Look for patterns starting with +, 00, or country codes
+        phone_patterns = [
+            r'\+[\d\s\-]{7,20}',  # + followed by digits/spaces/dashes (international format)
+            r'00[\d\s\-]{7,20}',   # 00 followed by digits/spaces/dashes
+            r'\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,9}',  # Formatted number with spaces/dashes
+        ]
+        
+        for pattern in phone_patterns:
+            matches = re.finditer(pattern, text)
+            for match in matches:
+                phone_candidate = match.group(0).strip()
+                # Validate it's actually a phone number (has enough digits)
+                digits_only = re.sub(r'\D', '', phone_candidate)
+                if len(digits_only) >= 7:  # Minimum phone number length
+                    return phone_candidate
+        
+        # If no pattern match, try removing text labels and extracting digits
+        # Remove common phone-related prefixes (case insensitive, no spaces)
+        cleaned_text = text
+        # Handle cases like "Phonenumberis" (no spaces)
+        cleaned_text = re.sub(r'phone\s*number\s*is', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'phonenumberis', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'phone\s*is', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'phoneis', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'phone\s*:', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'tel\s*:', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'telephone\s*:', '', cleaned_text, flags=re.IGNORECASE)
+        
+        # Now try to find phone number in cleaned text
+        for pattern in phone_patterns:
+            matches = re.finditer(pattern, cleaned_text)
+            for match in matches:
+                phone_candidate = match.group(0).strip()
+                digits_only = re.sub(r'\D', '', phone_candidate)
+                if len(digits_only) >= 7:
+                    return phone_candidate
+        
+        # Last resort: extract all digits and see if we have a valid phone number
+        # But preserve + and 00 prefixes if they exist
+        if '+' in cleaned_text or cleaned_text.strip().startswith('00'):
+            # Extract everything from + or 00 onwards, keeping digits, spaces, dashes
+            match = re.search(r'[+\d][\d\s\-]+', cleaned_text)
+            if match:
+                phone_candidate = match.group(0).strip()
+                digits_only = re.sub(r'\D', '', phone_candidate)
+                if len(digits_only) >= 7:
+                    return phone_candidate
+        
+        # Final fallback: extract just digits (7-15 digits)
+        digits_only = re.sub(r'\D', '', cleaned_text)
+        if len(digits_only) >= 7 and len(digits_only) <= 15:
+            # If it starts with 00, add it back
+            if cleaned_text.strip().startswith('00'):
+                return '00' + digits_only[2:] if len(digits_only) > 2 else digits_only
+            return digits_only
+        
+        return None
+    
+    def format_phone_number(self, phone):
+        """Format phone number to standard international format (+XX...).
+        
+        Converts formats like:
+        - "00 44 7766856276" -> "+447766856276"
+        - "+44 7766 856276" -> "+447766856276"
+        - "00447766856276" -> "+447766856276"
+        - "Phone number is 00 44 7766856276" -> "+447766856276"
+        """
+        if not phone:
+            return None
+        
+        # First, extract just the phone number if there's extra text
+        phone = self.extract_phone_from_text(phone)
+        if not phone:
+            return None
+        
+        # Remove all spaces, dashes, parentheses, and other formatting
+        phone_clean = re.sub(r'[\s\-\(\)\.]', '', phone.strip())
+        
+        # Handle different prefixes
+        if phone_clean.startswith("+"):
+            # Already in international format, just return cleaned
+            return phone_clean
+        elif phone_clean.startswith("00"):
+            # Replace 00 with + (international dialing prefix)
+            return "+" + phone_clean[2:]
+        elif phone_clean.startswith("0") and len(phone_clean) > 1:
+            # Check if it's actually 00XX format (like 044...)
+            # Common country codes that might follow a single 0
+            if len(phone_clean) > 3 and phone_clean[1:3] in ["44", "33", "49", "39", "34", "31", "32", "41", "43", "46", "47", "45", "48", "30", "36", "40"]:
+                # Looks like 044... format, remove first 0 and add +
+                return "+" + phone_clean[1:]
+            # Otherwise, might be local format - don't modify
+            return phone_clean
+        else:
+            # No prefix - if it's long enough and starts with a country code, add +
+            if len(phone_clean) >= 10 and phone_clean[0].isdigit():
+                # Check if starts with known country code
+                country_codes = ["44", "33", "49", "39", "34", "31", "32", "41", "43", "46", "47", "45", "48", "30", "36", "40", "353", "351", "358", "359", "61", "64", "1", "420"]
+                for code in country_codes:
+                    if phone_clean.startswith(code):
+                        return "+" + phone_clean
+            return phone_clean
+    
+    def parse_country_from_phone(self, phone):
+        """Parse country from phone number using country code."""
+        if not phone:
+            return None
+        
+        # Remove spaces and common prefixes
+        phone_clean = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        
+        # Country code mapping (common codes)
+        country_codes = {
+            "1": "US",  # US/Canada
+            "44": "UK",  # United Kingdom
+            "33": "FR",  # France
+            "49": "DE",  # Germany
+            "39": "IT",  # Italy
+            "34": "ES",  # Spain
+            "31": "NL",  # Netherlands
+            "32": "BE",  # Belgium
+            "41": "CH",  # Switzerland
+            "43": "AT",  # Austria
+            "46": "SE",  # Sweden
+            "47": "NO",  # Norway
+            "45": "DK",  # Denmark
+            "358": "FI",  # Finland
+            "48": "PL",  # Poland
+            "353": "IE",  # Ireland
+            "351": "PT",  # Portugal
+            "30": "GR",  # Greece
+            "420": "CZ",  # Czech Republic
+            "36": "HU",  # Hungary
+            "40": "RO",  # Romania
+            "359": "BG",  # Bulgaria
+            "61": "AU",  # Australia
+            "64": "NZ",  # New Zealand
+        }
+        
+        # Check for country codes (with or without + or 00 prefix)
+        if phone_clean.startswith("+"):
+            phone_clean = phone_clean[1:]
+        elif phone_clean.startswith("00"):
+            phone_clean = phone_clean[2:]
+        
+        # Try to match country codes (check longer codes first)
+        for code_length in [3, 2, 1]:
+            if len(phone_clean) >= code_length:
+                code = phone_clean[:code_length]
+                if code in country_codes:
+                    return country_codes[code]
+        
+        return None
+    
     def parse_country(self, text):
         """Parse country from headquarters text."""
         if not text:
@@ -393,6 +560,17 @@ class LinkedInScraper(BaseScraper):
         if not text:
             return None
         
+        text = text.strip()
+        
+        # Validate that this looks like a location, not a description
+        # Descriptions are usually long and contain common words
+        description_keywords = ["consultancy", "help", "provide", "mission", "entrepreneurs", "corporate", "businesses", "products", "market", "efficient", "effective", "strategic", "training", "teams", "generation", "buyers", "experience", "working", "companies", "years"]
+        text_lower = text.lower()
+        
+        # If it contains description keywords and is long, it's probably not a location
+        if len(text) > 100 or any(keyword in text_lower for keyword in description_keywords):
+            return None
+        
         # Extract region (usually city, state/province, country)
         # Return the full location string as region
         parts = text.split(",")
@@ -401,7 +579,11 @@ class LinkedInScraper(BaseScraper):
             region = ",".join(parts[:-1]).strip()
             return region if region else None
         
-        return text.strip() if text.strip() else None
+        # If it's a short string and doesn't look like a description, return it
+        if len(text) <= 100:
+            return text
+        
+        return None
 
     async def extract_company_details(self, page, company_url):
         """Extract detailed company information from a LinkedIn company /about/ page."""
@@ -512,18 +694,32 @@ class LinkedInScraper(BaseScraper):
             
             # Try multiple strategies to find headquarters
             try:
-                # Strategy 1: Look for definition list (dt/dd) pattern
+                # Strategy 1: Look for definition list (dt/dd) pattern - most reliable
                 dt_elements = await page.query_selector_all("dt")
                 for dt_el in dt_elements:
                     try:
                         dt_text = (await dt_el.inner_text()).strip().lower()
-                        if "headquarters" in dt_text:
+                        # Look specifically for "headquarters" - must be exact match or start with it
+                        # Exclude description, about, overview, mission, etc.
+                        if (dt_text == "headquarters" or dt_text.startswith("headquarters")) and \
+                           "description" not in dt_text and "about" not in dt_text and \
+                           "overview" not in dt_text and "mission" not in dt_text:
                             # Get the next dd element (sibling)
                             dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
                             if dd_el and dd_el.as_element():
-                                headquarters_text = (await dd_el.as_element().inner_text()).strip()
-                                if headquarters_text:
-                                    break
+                                hq_candidate = (await dd_el.as_element().inner_text()).strip()
+                                # Strict validation: must look like a location
+                                if hq_candidate and len(hq_candidate) < 200:
+                                    # Must contain location indicators (commas, or be short)
+                                    # Must NOT contain description keywords
+                                    description_keywords = ["consultancy", "help", "provide", "mission", "entrepreneurs", 
+                                                          "corporate", "businesses", "products", "market", "efficient", 
+                                                          "effective", "strategic", "training", "teams", "generation"]
+                                    hq_lower = hq_candidate.lower()
+                                    if not any(keyword in hq_lower for keyword in description_keywords):
+                                        if "," in hq_candidate or len(hq_candidate.split()) <= 5:
+                                            headquarters_text = hq_candidate
+                                            break
                     except:
                         continue
                 
@@ -531,33 +727,35 @@ class LinkedInScraper(BaseScraper):
                 if not headquarters_text:
                     hq_el = await page.query_selector("div[data-test-id='org-headquarters'], span[data-test-id='org-headquarters']")
                     if hq_el:
-                        headquarters_text = (await hq_el.inner_text()).strip()
+                        hq_candidate = (await hq_el.inner_text()).strip()
+                        # Validate it looks like a location
+                        if hq_candidate and len(hq_candidate) < 200:
+                            headquarters_text = hq_candidate
                 
-                # Strategy 3: Search by text content pattern
+                # Strategy 3: Search by text content pattern (more careful validation)
                 if not headquarters_text:
                     page_text = await page.evaluate("() => document.body.innerText")
                     if "Headquarters" in page_text:
                         # Use JavaScript to find the element containing headquarters
                         hq_text = await page.evaluate("""
                             () => {
-                                const allElements = document.querySelectorAll('dt, dd, div, span, p, li');
+                                const allElements = document.querySelectorAll('dt, dd');
                                 for (let el of allElements) {
                                     const text = el.textContent || el.innerText || '';
-                                    if (text.toLowerCase().includes('headquarters')) {
-                                        // Try to get the value part (usually after "Headquarters")
-                                        const parts = text.split(/headquarters/i);
-                                        if (parts.length > 1) {
-                                            const value = parts[1].trim().split(/[\\n\\r]/)[0].trim();
-                                            if (value && value.length > 3 && value.length < 200) {
-                                                return value;
-                                            }
-                                        }
-                                        // Or get the next sibling
+                                    const textLower = text.toLowerCase();
+                                    // Look for dt with "headquarters" but not description/about
+                                    if (el.tagName === 'DT' && textLower.includes('headquarters') && 
+                                        !textLower.includes('description') && !textLower.includes('about')) {
+                                        // Get the next sibling (dd)
                                         const nextSibling = el.nextElementSibling;
-                                        if (nextSibling) {
+                                        if (nextSibling && nextSibling.tagName === 'DD') {
                                             const siblingText = (nextSibling.textContent || nextSibling.innerText || '').trim();
+                                            // Validate: should be short and look like a location
                                             if (siblingText && siblingText.length > 3 && siblingText.length < 200) {
-                                                return siblingText;
+                                                // Check if it contains location indicators
+                                                if (siblingText.includes(',') || siblingText.split(' ').length <= 5) {
+                                                    return siblingText;
+                                                }
                                             }
                                         }
                                     }
@@ -570,32 +768,163 @@ class LinkedInScraper(BaseScraper):
             except Exception as e:
                 logger.debug(f"Error finding headquarters: {e}")
             
-            # Parse country and region from headquarters
+            # Extract phone number
+            phone_number = None
+            try:
+                # Strategy 1: Look for "Phone" in dt elements
+                dt_elements = await page.query_selector_all("dt")
+                for dt_el in dt_elements:
+                    try:
+                        dt_text = (await dt_el.inner_text()).strip().lower()
+                        if "phone" in dt_text:
+                            # Get the next dd element (sibling)
+                            dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
+                            if dd_el and dd_el.as_element():
+                                phone_number = (await dd_el.as_element().inner_text()).strip()
+                                if phone_number:
+                                    # Format phone number to standard international format
+                                    phone_number = self.format_phone_number(phone_number)
+                                    company_data["phone"] = phone_number
+                                    break
+                    except:
+                        continue
+                
+                # Strategy 2: Search by text content pattern
+                if not phone_number:
+                    page_text = await page.evaluate("() => document.body.innerText")
+                    if "Phone" in page_text:
+                        phone_match = await page.evaluate("""
+                            () => {
+                                const allElements = document.querySelectorAll('dt, dd, div, span, p, li');
+                                for (let el of allElements) {
+                                    const text = el.textContent || el.innerText || '';
+                                    if (text.toLowerCase().includes('phone')) {
+                                        const parts = text.split(/phone/i);
+                                        if (parts.length > 1) {
+                                            const value = parts[1].trim().split(/[\\n\\r]/)[0].trim();
+                                            // Check if it looks like a phone number (contains digits)
+                                            if (value && /[0-9]/.test(value) && value.length >= 7) {
+                                                return value;
+                                            }
+                                        }
+                                        const nextSibling = el.nextElementSibling;
+                                        if (nextSibling) {
+                                            const siblingText = (nextSibling.textContent || nextSibling.innerText || '').trim();
+                                            if (siblingText && /[0-9]/.test(siblingText) && siblingText.length >= 7) {
+                                                return siblingText;
+                                            }
+                                        }
+                                    }
+                                }
+                                return null;
+                            }
+                        """)
+                        if phone_match:
+                            phone_number = phone_match
+                            # Format phone number to standard international format
+                            phone_number = self.format_phone_number(phone_number)
+                            company_data["phone"] = phone_number
+            except Exception as e:
+                logger.debug(f"Error finding phone number: {e}")
+            
+            # Extract country from phone number if available, otherwise from headquarters
+            if phone_number:
+                country_from_phone = self.parse_country_from_phone(phone_number)
+                if country_from_phone:
+                    company_data["country"] = country_from_phone
+                    logger.debug(f"Extracted country from phone number: {country_from_phone}")
+            
+            # Extract region field specifically (if it exists as a separate field)
+            region_text = None
+            try:
+                dt_elements = await page.query_selector_all("dt")
+                for dt_el in dt_elements:
+                    try:
+                        dt_text = (await dt_el.inner_text()).strip().lower()
+                        # Look for "Region" field specifically
+                        if dt_text == "region" or (dt_text.startswith("region") and "headquarters" not in dt_text):
+                            dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
+                            if dd_el and dd_el.as_element():
+                                region_candidate = (await dd_el.as_element().inner_text()).strip()
+                                # Validate it looks like a location
+                                if region_candidate and len(region_candidate) < 200:
+                                    if "," in region_candidate or len(region_candidate.split()) <= 5:
+                                        region_text = region_candidate
+                                        break
+                    except:
+                        continue
+            except Exception as e:
+                logger.debug(f"Error finding region field: {e}")
+            
+            # Parse country and region from headquarters (if not already set from phone/region field)
             if headquarters_text:
-                company_data["country"] = self.parse_country(headquarters_text)
-                company_data["region"] = self.parse_region(headquarters_text)
+                if not company_data.get("country"):
+                    company_data["country"] = self.parse_country(headquarters_text)
+                # Only use headquarters for region if we didn't find a specific region field
+                if not region_text:
+                    region_text = self.parse_region(headquarters_text)
                 company_data["headquarters"] = headquarters_text  # Keep full text for reference
             
-            # Extract company type (usually "Company size" or "Type" field)
-            # This maps to the "type" field in the schema
-            type_selectors = [
-                "dt:has-text('Company size') + dd",
-                "dt:has-text('Type') + dd",
-                "div[data-test-id='org-type']",
-            ]
-            for selector in type_selectors:
-                try:
-                    type_el = await page.query_selector(selector)
-                    if type_el:
-                        company_type = (await type_el.inner_text()).strip()
-                        if company_type:
-                            company_data["type"] = company_type
-                            break
-                except:
-                    continue
+            # Set region if we found it (with final validation to ensure it's not description text)
+            if region_text:
+                # Final check: make sure it's not description text
+                region_lower = region_text.lower()
+                description_indicators = ["consultancy", "help", "provide", "mission", "entrepreneurs", 
+                                        "corporate", "businesses", "products", "market", "efficient", 
+                                        "effective", "strategic", "training", "teams", "generation", 
+                                        "buyers", "experience", "working", "companies", "years"]
+                # If it's too long or contains description keywords, don't use it
+                if len(region_text) <= 100 and not any(indicator in region_lower for indicator in description_indicators):
+                    company_data["region"] = region_text
+                else:
+                    logger.debug(f"Rejected region text (looks like description): {region_text[:50]}...")
+                    company_data["region"] = None
             
-            # If no type found, default to "brand" as suggested
-            if not company_data.get("type"):
+            # Extract company type (should be "Type" field, NOT "Company size")
+            # This maps to the "type" field in the schema
+            company_type = None
+            try:
+                # Strategy 1: Look for "Type" field specifically (not Company size)
+                dt_elements = await page.query_selector_all("dt")
+                for dt_el in dt_elements:
+                    try:
+                        dt_text = (await dt_el.inner_text()).strip().lower()
+                        # Look for "Type" but NOT "Company size"
+                        if "type" in dt_text and "company size" not in dt_text and "size" not in dt_text:
+                            # Get the next dd element (sibling)
+                            dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
+                            if dd_el and dd_el.as_element():
+                                company_type = (await dd_el.as_element().inner_text()).strip()
+                                if company_type:
+                                    break
+                    except:
+                        continue
+                
+                # Strategy 2: Use selector for Type field (but avoid Company size)
+                if not company_type:
+                    type_selectors = [
+                        "dt:has-text('Type') + dd",
+                        "div[data-test-id='org-type']",
+                    ]
+                    for selector in type_selectors:
+                        try:
+                            type_el = await page.query_selector(selector)
+                            if type_el:
+                                company_type = (await type_el.inner_text()).strip()
+                                # Make sure it's not a company size value (contains numbers or "employees")
+                                if company_type and not re.search(r'\d+.*employee', company_type, re.IGNORECASE):
+                                    break
+                                else:
+                                    company_type = None
+                        except:
+                            continue
+            except Exception as e:
+                logger.debug(f"Error finding company type: {e}")
+            
+            if company_type:
+                company_data["type"] = company_type
+            else:
+                # If no type found, default to "brand" as suggested
                 company_data["type"] = "brand"
             
             # Set source
@@ -882,11 +1211,11 @@ class LinkedInScraper(BaseScraper):
                         else:
                             company_record["domain"] = None
                     
-                    # Add country (parsed from headquarters)
+                    # Add country (parsed from phone number or headquarters)
                     if detailed_data.get("country"):
                         company_record["country"] = detailed_data["country"]
                     
-                    # Add region (parsed from headquarters, or fallback to search result region)
+                    # Add region (parsed from region field or headquarters, or fallback to search result region)
                     if detailed_data.get("region"):
                         company_record["region"] = detailed_data["region"]
                     elif company_info.get("region"):
@@ -899,11 +1228,13 @@ class LinkedInScraper(BaseScraper):
                         company_record["type"] = "brand"
                     
                     # Create contact record (will be linked to company via company_id in task)
+                    # Phone number should be in contact record, not company record
                     contact_record = {
                         "linkedin_url": company_info.get("linkedin_url") or detailed_data.get("linkedin_url"),
                         "name": None,
-                        "position": None,
-                        "email": None
+                        "title": None,
+                        "email": None,
+                        "phone": detailed_data.get("phone")  # Add phone to contact record
                     }
                     
                     # Store both company and contact data together
@@ -917,7 +1248,8 @@ class LinkedInScraper(BaseScraper):
                             "linkedin_url": detailed_data.get("linkedin_url")
                         }
                     })
-                    logger.info(f"✓ Extracted: {company_record['name']} - Domain: {company_record.get('domain', 'N/A')}, Country: {company_record.get('country', 'N/A')}, Region: {company_record.get('region', 'N/A')}, Type: {company_record.get('type', 'N/A')}")
+                    phone_info = f", Phone: {contact_record.get('phone', 'N/A')}" if contact_record.get('phone') else ""
+                    logger.info(f"✓ Extracted: {company_record['name']} - Domain: {company_record.get('domain', 'N/A')}, Country: {company_record.get('country', 'N/A')}, Region: {company_record.get('region', 'N/A')}, Type: {company_record.get('type', 'N/A')}{phone_info}")
                     
                     # Add a small delay between requests to avoid rate limiting
                     await page.wait_for_timeout(2000)
@@ -936,7 +1268,7 @@ class LinkedInScraper(BaseScraper):
                     contact_record = {
                         "linkedin_url": company_info.get("linkedin_url"),
                         "name": None,
-                        "position": None,
+                        "title": None,
                         "email": None
                     }
                     results.append({
