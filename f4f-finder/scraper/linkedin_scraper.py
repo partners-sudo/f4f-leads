@@ -555,34 +555,78 @@ class LinkedInScraper(BaseScraper):
         
         return None
     
+    def get_region_from_country(self, country_code):
+        """Map country code to business region (EMEA, APAC, Americas, etc.).
+        
+        Region represents business territory, not geographic location.
+        Examples:
+        - Poland -> EMEA
+        - UK -> EMEA
+        - US -> Americas
+        - Australia -> APAC
+        """
+        if not country_code:
+            return None
+        
+        # Normalize country code to uppercase
+        country_code = country_code.upper()
+        
+        # EMEA: Europe, Middle East, and Africa
+        emea_countries = {
+            "UK", "GB", "FR", "DE", "IT", "ES", "NL", "BE", "CH", "AT", 
+            "SE", "NO", "DK", "FI", "PL", "IE", "PT", "GR", "CZ", "HU", 
+            "RO", "BG", "IE", "LU", "IS", "EE", "LV", "LT", "SK", "SI",
+            "HR", "CY", "MT", "AE", "SA", "IL", "ZA", "EG", "MA", "NG",
+            "KE", "GH", "TN", "DZ", "TR", "RU", "UA", "BY", "MD", "RS",
+            "BA", "MK", "AL", "ME", "XK", "GE", "AM", "AZ"
+        }
+        
+        # APAC: Asia-Pacific
+        apac_countries = {
+            "AU", "NZ", "CN", "JP", "KR", "IN", "SG", "MY", "TH", "PH",
+            "VN", "ID", "HK", "TW", "BD", "PK", "LK", "MM", "KH", "LA",
+            "BN", "MN", "NP", "BT", "MV", "FJ", "PG", "SB", "VU", "NC",
+            "PF", "WS", "TO", "KI", "FM", "MH", "PW", "AS", "GU", "MP"
+        }
+        
+        # Americas: North and South America
+        americas_countries = {
+            "US", "CA", "MX", "BR", "AR", "CL", "CO", "PE", "VE", "EC",
+            "BO", "PY", "UY", "GY", "SR", "GF", "FK", "BZ", "CR", "GT",
+            "HN", "NI", "PA", "SV", "CU", "DO", "HT", "JM", "TT", "BB",
+            "BS", "AG", "LC", "VC", "GD", "DM", "KN", "AW", "CW", "SX"
+        }
+        
+        # LATAM: Latin America (sometimes treated separately, but here included in Americas)
+        # Middle East (some may be in EMEA, but keeping separate for clarity)
+        middle_east_countries = {
+            "AE", "SA", "IL", "JO", "LB", "SY", "IQ", "IR", "YE", "OM",
+            "KW", "QA", "BH", "PS", "AF"
+        }
+        
+        # Check region membership
+        if country_code in emea_countries:
+            return "EMEA"
+        elif country_code in apac_countries:
+            return "APAC"
+        elif country_code in americas_countries:
+            return "Americas"
+        elif country_code in middle_east_countries:
+            return "EMEA"  # Middle East is typically part of EMEA
+        else:
+            # Unknown country - return None
+            logger.debug(f"Unknown country code for region mapping: {country_code}")
+            return None
+    
     def parse_region(self, text):
-        """Parse region from headquarters text."""
-        if not text:
-            return None
+        """Parse region from headquarters text.
         
-        text = text.strip()
-        
-        # Validate that this looks like a location, not a description
-        # Descriptions are usually long and contain common words
-        description_keywords = ["consultancy", "help", "provide", "mission", "entrepreneurs", "corporate", "businesses", "products", "market", "efficient", "effective", "strategic", "training", "teams", "generation", "buyers", "experience", "working", "companies", "years"]
-        text_lower = text.lower()
-        
-        # If it contains description keywords and is long, it's probably not a location
-        if len(text) > 100 or any(keyword in text_lower for keyword in description_keywords):
-            return None
-        
-        # Extract region (usually city, state/province, country)
-        # Return the full location string as region
-        parts = text.split(",")
-        if len(parts) >= 2:
-            # Return everything except the last part (country) as region
-            region = ",".join(parts[:-1]).strip()
-            return region if region else None
-        
-        # If it's a short string and doesn't look like a description, return it
-        if len(text) <= 100:
-            return text
-        
+        NOTE: This function is deprecated in favor of get_region_from_country().
+        Region should represent business territory (EMEA, APAC, Americas), not geographic location.
+        This function is kept for backward compatibility but should not be used for region extraction.
+        """
+        # This function is no longer used for region extraction
+        # Region is now determined from country code using get_region_from_country()
         return None
 
     async def extract_company_details(self, page, company_url):
@@ -834,51 +878,19 @@ class LinkedInScraper(BaseScraper):
                     company_data["country"] = country_from_phone
                     logger.debug(f"Extracted country from phone number: {country_from_phone}")
             
-            # Extract region field specifically (if it exists as a separate field)
-            region_text = None
-            try:
-                dt_elements = await page.query_selector_all("dt")
-                for dt_el in dt_elements:
-                    try:
-                        dt_text = (await dt_el.inner_text()).strip().lower()
-                        # Look for "Region" field specifically
-                        if dt_text == "region" or (dt_text.startswith("region") and "headquarters" not in dt_text):
-                            dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
-                            if dd_el and dd_el.as_element():
-                                region_candidate = (await dd_el.as_element().inner_text()).strip()
-                                # Validate it looks like a location
-                                if region_candidate and len(region_candidate) < 200:
-                                    if "," in region_candidate or len(region_candidate.split()) <= 5:
-                                        region_text = region_candidate
-                                        break
-                    except:
-                        continue
-            except Exception as e:
-                logger.debug(f"Error finding region field: {e}")
-            
-            # Parse country and region from headquarters (if not already set from phone/region field)
+            # Parse country from headquarters (if not already set from phone)
             if headquarters_text:
                 if not company_data.get("country"):
                     company_data["country"] = self.parse_country(headquarters_text)
-                # Only use headquarters for region if we didn't find a specific region field
-                if not region_text:
-                    region_text = self.parse_region(headquarters_text)
                 company_data["headquarters"] = headquarters_text  # Keep full text for reference
             
-            # Set region if we found it (with final validation to ensure it's not description text)
-            if region_text:
-                # Final check: make sure it's not description text
-                region_lower = region_text.lower()
-                description_indicators = ["consultancy", "help", "provide", "mission", "entrepreneurs", 
-                                        "corporate", "businesses", "products", "market", "efficient", 
-                                        "effective", "strategic", "training", "teams", "generation", 
-                                        "buyers", "experience", "working", "companies", "years"]
-                # If it's too long or contains description keywords, don't use it
-                if len(region_text) <= 100 and not any(indicator in region_lower for indicator in description_indicators):
-                    company_data["region"] = region_text
-                else:
-                    logger.debug(f"Rejected region text (looks like description): {region_text[:50]}...")
-                    company_data["region"] = None
+            # Set region based on country code (business territory, not geographic location)
+            # Region should be EMEA, APAC, or Americas based on country
+            if company_data.get("country"):
+                region = self.get_region_from_country(company_data["country"])
+                if region:
+                    company_data["region"] = region
+                    logger.debug(f"Set region to {region} based on country {company_data['country']}")
             
             # Extract company type (should be "Type" field, NOT "Company size")
             # This maps to the "type" field in the schema
@@ -1215,11 +1227,15 @@ class LinkedInScraper(BaseScraper):
                     if detailed_data.get("country"):
                         company_record["country"] = detailed_data["country"]
                     
-                    # Add region (parsed from region field or headquarters, or fallback to search result region)
+                    # Add region (business territory: EMEA, APAC, or Americas)
+                    # Region is determined from country, not from geographic location
                     if detailed_data.get("region"):
                         company_record["region"] = detailed_data["region"]
-                    elif company_info.get("region"):
-                        company_record["region"] = company_info.get("region")
+                    elif company_record.get("country"):
+                        # If region not set but country is available, calculate region from country
+                        region = self.get_region_from_country(company_record["country"])
+                        if region:
+                            company_record["region"] = region
                     
                     # Add type (from detailed data, defaults to "brand" if not found)
                     if detailed_data.get("type"):
