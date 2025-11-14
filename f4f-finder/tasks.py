@@ -9,9 +9,8 @@ from scraper.linkedin_scraper import LinkedInScraper
 
 from scraper.marketplace_scraper import MarketplaceScraper
 
-from enrichment.email_verification import verify_email
-
 from enrichment.clearbit_integration import enrich_company
+from enrichment.contact_verification import verify_contact
 
 from utils.logger import logger
 
@@ -63,7 +62,6 @@ def scrape_competitor_partners(self, url, source="competitor"):
         scraper = CompetitorScraper(url)
         companies = run_async(scraper.extract_companies())
         for c in companies:
-            c['email'] = verify_email(c.get('email'))
             enriched = enrich_company(c.get('domain'))
             c.update(enriched)
             # Filter to only include valid schema fields
@@ -167,4 +165,81 @@ def scrape_marketplaces(self, marketplace_url):
             sb.table('companies').upsert(filtered_company).execute()
         return {'count': len(companies)}
     except Exception as e:
+        raise self.retry(exc=e, countdown=60)
+
+@app.task(bind=True)
+def verify_contacts(self, contact_ids=None, batch_size=100):
+    """
+    Verify email and LinkedIn URL for contacts and update confidence_score and last_validated.
+    
+    Args:
+        contact_ids: Optional list of contact IDs to verify. If None, verifies all contacts.
+        batch_size: Number of contacts to process in each batch (default: 100)
+        
+    Returns:
+        Dictionary with verification statistics
+    """
+    try:
+        verified_count = 0
+        error_count = 0
+        
+        # Fetch contacts
+        if contact_ids:
+            # Verify specific contacts
+            query = sb.table('contacts').select('*').in_('id', contact_ids)
+        else:
+            # Verify all contacts
+            query = sb.table('contacts').select('*')
+        
+        # Process in batches
+        offset = 0
+        while True:
+            batch_query = query.range(offset, offset + batch_size - 1)
+            response = batch_query.execute()
+            
+            if not response.data or len(response.data) == 0:
+                break
+            
+            contacts = response.data
+            logger.info(f"Processing batch of {len(contacts)} contacts (offset: {offset})")
+            
+            for contact in contacts:
+                try:
+                    # Verify contact
+                    verification_result = verify_contact(contact)
+                    
+                    # Update contact with verification results
+                    update_data = {
+                        'email': verification_result['email'],
+                        'linkedin_url': verification_result['linkedin_url'],
+                        'confidence_score': verification_result['confidence_score'],
+                        'last_validated': verification_result['last_validated']
+                    }
+                    
+                    # Filter to only include valid schema fields
+                    filtered_update = filter_contact_data(update_data)
+                    
+                    # Update the contact
+                    sb.table('contacts').update(filtered_update).eq('id', contact['id']).execute()
+                    verified_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error verifying contact {contact.get('id')}: {e}")
+                    error_count += 1
+                    continue
+            
+            offset += batch_size
+            
+            # Break if we got fewer contacts than batch_size (last batch)
+            if len(contacts) < batch_size:
+                break
+        
+        return {
+            'verified_count': verified_count,
+            'error_count': error_count,
+            'total_processed': verified_count + error_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in verify_contacts task: {e}")
         raise self.retry(exc=e, countdown=60)
