@@ -28,7 +28,7 @@ export default function Companies() {
     source: '',
   })
 
-  const { data: companies, isLoading } = useCompanies(filters)
+  const { data: companies, isLoading, error } = useCompanies(filters)
 
   return (
     <div className="p-6 space-y-6">
@@ -38,6 +38,18 @@ export default function Companies() {
           <p className="text-muted-foreground">Manage all companies</p>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-red-800 font-medium">Error loading companies</p>
+          <p className="text-red-600 text-sm mt-1">
+            {error instanceof Error ? error.message : 'Unknown error occurred'}
+          </p>
+          <p className="text-red-500 text-xs mt-2">
+            Check browser console for details. This might be a Row Level Security (RLS) policy issue.
+          </p>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="grid grid-cols-5 gap-4">
@@ -80,7 +92,20 @@ export default function Companies() {
 
       {/* Table */}
       {isLoading ? (
-        <div>Loading...</div>
+        <div className="text-center py-8">Loading companies...</div>
+      ) : error ? (
+        <div className="text-center py-8 text-muted-foreground">
+          Unable to load companies. Please check the error message above.
+        </div>
+      ) : !companies || companies.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <p className="text-lg font-medium mb-2">No companies found</p>
+          <p className="text-sm">
+            {Object.values(filters).some(f => f) 
+              ? 'Try adjusting your filters' 
+              : 'No companies in the database yet'}
+          </p>
+        </div>
       ) : (
         <div className="border rounded-lg">
           <Table>
@@ -96,7 +121,7 @@ export default function Companies() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {companies?.map((company) => (
+              {companies.map((company) => (
                 <TableRow key={company.id}>
                   <TableCell className="font-medium">{company.name}</TableCell>
                   <TableCell>{company.domain || '-'}</TableCell>

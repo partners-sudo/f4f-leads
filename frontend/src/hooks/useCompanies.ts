@@ -31,8 +31,13 @@ export function useCompanies(filters?: {
 
       const { data, error } = await query.order('created_at', { ascending: false })
 
-      if (error) throw error
-      return data as Company[]
+      if (error) {
+        console.error('Error fetching companies:', error)
+        throw error
+      }
+      
+      console.log('Fetched companies:', data?.length || 0, 'companies')
+      return (data || []) as Company[]
     },
   })
 }

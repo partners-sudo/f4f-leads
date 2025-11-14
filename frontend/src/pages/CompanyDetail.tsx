@@ -17,7 +17,7 @@ export default function CompanyDetail() {
   const { id } = useParams<{ id: string }>()
   const { data: company, isLoading: companyLoading } = useCompany(id || '')
   const { data: contacts, isLoading: contactsLoading } = useContacts(id)
-  const { data: outreachLogs } = useOutreachLogs()
+  const { data: outreachLogs, isLoading: outreachLogsLoading, error: outreachLogsError } = useOutreachLogs()
 
   if (companyLoading) {
     return <div className="p-6">Loading...</div>
@@ -27,9 +27,24 @@ export default function CompanyDetail() {
     return <div className="p-6">Company not found</div>
   }
 
-  const companyOutreachLogs = outreachLogs?.filter(
-    (log) => log.company_id === id
-  ) || []
+  // Filter logs for this company - handle both string and UUID comparison
+  const companyOutreachLogs = outreachLogs?.filter((log) => {
+    const logCompanyId = String(log.company_id)
+    const companyId = String(id)
+    return logCompanyId === companyId
+  }) || []
+
+  // Debug logging
+  if (outreachLogs && id) {
+    console.log('Company ID (from URL):', id, typeof id)
+    console.log('Total outreach logs fetched:', outreachLogs.length)
+    console.log('Company outreach logs (filtered):', companyOutreachLogs.length)
+    if (outreachLogs.length > 0) {
+      console.log('First log company_id:', outreachLogs[0]?.company_id, typeof outreachLogs[0]?.company_id)
+      console.log('All unique company_ids in logs:', [...new Set(outreachLogs.map(log => log.company_id))])
+      console.log('Does first log match?', String(outreachLogs[0]?.company_id) === String(id))
+    }
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -159,62 +174,81 @@ export default function CompanyDetail() {
         </TabsContent>
 
         <TabsContent value="outreach" className="space-y-4">
-          <div className="border rounded-lg">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Stage</TableHead>
-                  <TableHead>Sent At</TableHead>
-                  <TableHead>Opened At</TableHead>
-                  <TableHead>Replied At</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {companyOutreachLogs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell>
-                      {log.contacts?.name || '-'}
-                      <br />
-                      <span className="text-sm text-muted-foreground">
-                        {log.contacts?.email || '-'}
-                      </span>
-                    </TableCell>
-                    <TableCell>Stage {log.sequence_stage}</TableCell>
-                    <TableCell>
-                      {log.sent_at
-                        ? new Date(log.sent_at).toLocaleString()
-                        : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {log.opened_at
-                        ? new Date(log.opened_at).toLocaleString()
-                        : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {log.replied_at
-                        ? new Date(log.replied_at).toLocaleString()
-                        : '-'}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`px-2 py-1 rounded text-xs ${
-                          log.status === 'replied'
-                            ? 'bg-green-100 text-green-800'
-                            : log.status === 'sent'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
-                        {log.status}
-                      </span>
-                    </TableCell>
+          {outreachLogsError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-red-800 font-medium">Error loading outreach history</p>
+              <p className="text-red-600 text-sm mt-1">
+                {outreachLogsError instanceof Error ? outreachLogsError.message : 'Unknown error occurred'}
+              </p>
+            </div>
+          )}
+          {outreachLogsLoading ? (
+            <div className="text-center py-8">Loading outreach history...</div>
+          ) : companyOutreachLogs.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p className="text-lg font-medium mb-2">No outreach history</p>
+              <p className="text-sm">No outreach emails have been sent to contacts at this company yet.</p>
+            </div>
+          ) : (
+            <div className="border rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Stage</TableHead>
+                    <TableHead>Sent At</TableHead>
+                    <TableHead>Opened At</TableHead>
+                    <TableHead>Replied At</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {companyOutreachLogs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell>
+                        {log.contacts?.name || '-'}
+                        <br />
+                        <span className="text-sm text-muted-foreground">
+                          {log.contacts?.email || '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell>Stage {log.sequence_stage}</TableCell>
+                      <TableCell>
+                        {log.sent_at
+                          ? new Date(log.sent_at).toLocaleString()
+                          : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {log.opened_at
+                          ? new Date(log.opened_at).toLocaleString()
+                          : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {log.replied_at
+                          ? new Date(log.replied_at).toLocaleString()
+                          : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`px-2 py-1 rounded text-xs ${
+                            log.status === 'replied'
+                              ? 'bg-green-100 text-green-800'
+                              : log.status === 'sent'
+                              ? 'bg-blue-100 text-blue-800'
+                              : log.status === 'bounced' || log.status === 'failed'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}
+                        >
+                          {log.status}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

@@ -19,7 +19,7 @@ export default function OutreachLogs() {
     dateTo: '',
   })
 
-  const { data: logs, isLoading } = useOutreachLogs(filters)
+  const { data: logs, isLoading, error } = useOutreachLogs(filters)
 
   return (
     <div className="p-6 space-y-6">
@@ -27,6 +27,18 @@ export default function OutreachLogs() {
         <h1 className="text-3xl font-bold">Outreach Logs</h1>
         <p className="text-muted-foreground">All email outreach activity</p>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-red-800 font-medium">Error loading outreach logs</p>
+          <p className="text-red-600 text-sm mt-1">
+            {error instanceof Error ? error.message : 'Unknown error occurred'}
+          </p>
+          <p className="text-red-500 text-xs mt-2">
+            Check browser console for details. This might be a foreign key relationship issue.
+          </p>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="grid grid-cols-5 gap-4">
@@ -69,7 +81,20 @@ export default function OutreachLogs() {
 
       {/* Table */}
       {isLoading ? (
-        <div>Loading...</div>
+        <div className="text-center py-8">Loading outreach logs...</div>
+      ) : error ? (
+        <div className="text-center py-8 text-muted-foreground">
+          Unable to load outreach logs. Please check the error message above.
+        </div>
+      ) : !logs || logs.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <p className="text-lg font-medium mb-2">No outreach logs found</p>
+          <p className="text-sm">
+            {Object.values(filters).some(f => f) 
+              ? 'Try adjusting your filters' 
+              : 'No outreach activity recorded yet'}
+          </p>
+        </div>
       ) : (
         <div className="border rounded-lg">
           <Table>
@@ -85,7 +110,7 @@ export default function OutreachLogs() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {logs?.map((log) => (
+              {logs.map((log) => (
                 <TableRow key={log.id}>
                   <TableCell>
                     {log.contacts?.name || '-'}

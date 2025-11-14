@@ -121,7 +121,7 @@ export default function ReviewDetail() {
                 <div>
                   <p className="text-sm text-muted-foreground">Message</p>
                   <div className="mt-2 p-4 bg-muted rounded-lg">
-                    {outreachLog?.message_snippet || review.notes || 'No message available'}
+                    { review.notes || 'No message available'}
                   </div>
                 </div>
                 <div>
