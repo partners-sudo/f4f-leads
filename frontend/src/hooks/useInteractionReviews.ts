@@ -109,7 +109,14 @@ export function useApplyReview() {
       assigned_to: string
       contact_email: string
     }) => {
-      return n8nApi.applyReview(data)
+      return n8nApi.applyReview({
+        interaction_review_id: data.interaction_review_id,
+        chosen_subject: data.chosen_subject,
+        chosen_body: data.chosen_body,
+        outcome: data.outcome as 'f4f' | 'figgyz' | 'not_interested' | 'converted',
+        assigned_to: data.assigned_to,
+        contact_email: data.contact_email,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['interaction-reviews'] })
