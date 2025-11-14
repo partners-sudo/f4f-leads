@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useInteractionReview, useAISuggestions, useApplyReview } from '@/hooks/useInteractionReviews'
+import { useInteractionReview, useAISuggestions, useApplyReview, useTemplates } from '@/hooks/useInteractionReviews'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { n8nApi } from '@/lib/n8n'
+import { replaceTemplateVariables } from '@/lib/templateUtils'
+import { supabase, type Template } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,6 +24,36 @@ export default function ReviewDetail() {
   const [editedBody, setEditedBody] = useState('')
   const [outcome, setOutcome] = useState<'f4f' | 'figgyz' | 'not_interested' | 'converted'>('f4f')
   const [assignedTo, setAssignedTo] = useState('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
+
+  // Get brand from outcome for template filtering
+  const brandForTemplates = useMemo(() => {
+    if (outcome === 'f4f') return 'F4F'
+    if (outcome === 'figgyz') return 'FiGGYZ'
+    return undefined // Show all templates for other outcomes
+  }, [outcome])
+
+  const { data: templates, isLoading: templatesLoading, error: templatesError } = useTemplates(brandForTemplates)
+
+  // Debug: Log template loading status
+  useEffect(() => {
+    console.log('Templates status:', { 
+      loading: templatesLoading, 
+      count: templates?.length || 0, 
+      brand: brandForTemplates,
+      error: templatesError 
+    })
+  }, [templates, templatesLoading, brandForTemplates, templatesError])
+
+  // Clear selected template if it doesn't match the current brand filter
+  useEffect(() => {
+    if (selectedTemplateId && templates) {
+      const selectedTemplate = templates.find((t) => t.id === selectedTemplateId)
+      if (!selectedTemplate) {
+        setSelectedTemplateId('')
+      }
+    }
+  }, [templates, selectedTemplateId])
 
   const syncToErpMutation = useMutation({
     mutationFn: async (companyId: string) => {
@@ -49,12 +81,160 @@ export default function ReviewDetail() {
 
   const handleSelectSuggestion = (index: number) => {
     setSelectedSuggestion(index)
+    setSelectedTemplateId('') // Clear template selection when using AI suggestion
     if (suggestions) {
       setEditedSubject(suggestions.suggestions[index].subject)
       setEditedBody(suggestions.suggestions[index].body)
       setOutcome(suggestions.suggestions[index].outcome)
     }
   }
+
+  const handleSelectTemplate = (templateId: string) => {
+    if (!templateId) {
+      setSelectedTemplateId('')
+      return
+    }
+
+    console.log('handleSelectTemplate called:', {
+      templateId,
+      templatesCount: templates?.length || 0,
+      templates: templates?.map(t => ({ id: t.id, name: t.name, brand: t.brand })),
+      brandForTemplates
+    })
+
+    setSelectedTemplateId(templateId)
+    setSelectedSuggestion(null) // Clear suggestion selection when using template
+    
+    // Try to find template with both string and number comparison
+    let template = templates?.find((t) => String(t.id) === String(templateId) || t.id === templateId)
+    
+    // If template not found in filtered list, try fetching it directly
+    if (!template && templateId) {
+      console.warn('Template not found in filtered list, fetching directly...', templateId)
+      // Fetch the template directly from database
+      supabase
+        .from('templates')
+        .select('*')
+        .eq('id', templateId)
+        .single()
+        .then(({ data, error }: { data: Template | null; error: any }) => {
+          if (error) {
+            console.error('Error fetching template:', error)
+            return
+          }
+          if (data) {
+            // Apply the template
+            if (!review) {
+              setEditedSubject(data.subject)
+              setEditedBody(data.body)
+              return
+            }
+            const outreachLog = review.outreach_logs
+            if (!outreachLog) {
+              setEditedSubject(data.subject)
+              setEditedBody(data.body)
+              return
+            }
+            const variables = {
+              name: outreachLog.contacts?.name || '',
+              company: outreachLog.companies?.name || '',
+              email: outreachLog.contacts?.email || '',
+            }
+            const subject = replaceTemplateVariables(data.subject, variables)
+            const body = replaceTemplateVariables(data.body, variables)
+            setEditedSubject(subject)
+            setEditedBody(body)
+            if (data.brand === 'F4F') {
+              setOutcome('f4f')
+            } else if (data.brand === 'FiGGYZ') {
+              setOutcome('figgyz')
+            }
+          }
+        })
+      // Still return early since we're fetching asynchronously
+      return
+    }
+    
+    if (!template) {
+      console.error('Template not found:', {
+        templateId,
+        availableTemplateIds: templates?.map(t => t.id) || [],
+        templatesCount: templates?.length || 0
+      })
+      return
+    }
+
+    // If review is not loaded yet, just set the template ID and return
+    // The template will be applied when review loads
+    if (!review) {
+      console.warn('Review not loaded yet, template selection will be applied when review loads')
+      return
+    }
+
+    const outreachLog = review.outreach_logs
+    if (!outreachLog) {
+      console.warn('Outreach log not available')
+      // Still set the template, but without variable replacement
+      setEditedSubject(template.subject)
+      setEditedBody(template.body)
+      return
+    }
+
+    // Prepare variables for replacement
+    const variables = {
+      name: outreachLog.contacts?.name || '',
+      company: outreachLog.companies?.name || '',
+      email: outreachLog.contacts?.email || '',
+    }
+
+    // Replace variables in subject and body
+    const subject = replaceTemplateVariables(template.subject, variables)
+    const body = replaceTemplateVariables(template.body, variables)
+
+    setEditedSubject(subject)
+    setEditedBody(body)
+    
+    // Set outcome based on template brand
+    if (template.brand === 'F4F') {
+      setOutcome('f4f')
+    } else if (template.brand === 'FiGGYZ') {
+      setOutcome('figgyz')
+    }
+  }
+
+  // Apply template when review/templates load if a template was already selected
+  useEffect(() => {
+    if (selectedTemplateId && review && templates && templates.length > 0) {
+      const template = templates.find((t) => String(t.id) === String(selectedTemplateId) || t.id === selectedTemplateId)
+      if (!template) {
+        console.warn('Template not found in current templates list, trying to fetch all templates...')
+        // Template might be filtered out - try fetching without brand filter
+        return
+      }
+
+      const outreachLog = review.outreach_logs
+      if (!outreachLog) {
+        setEditedSubject(template.subject)
+        setEditedBody(template.body)
+        return
+      }
+
+      // Prepare variables for replacement
+      const variables = {
+        name: outreachLog.contacts?.name || '',
+        company: outreachLog.companies?.name || '',
+        email: outreachLog.contacts?.email || '',
+      }
+
+      // Replace variables in subject and body
+      const subject = replaceTemplateVariables(template.subject, variables)
+      const body = replaceTemplateVariables(template.body, variables)
+
+      setEditedSubject(subject)
+      setEditedBody(body)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review, selectedTemplateId, templates])
 
   const handleSend = () => {
     if (!review || !editedSubject || !editedBody) return
@@ -202,6 +382,51 @@ export default function ReviewDetail() {
               <CardTitle>Send Reply</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="template">Template (Optional)</Label>
+                <select
+                  id="template"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  value={selectedTemplateId}
+                  onChange={(e) => {
+                    console.log('Template selected:', e.target.value)
+                    handleSelectTemplate(e.target.value)
+                  }}
+                >
+                  <option value="">Select a template...</option>
+                  {templates?.map((template) => {
+                    const templateId = String(template.id)
+                    return (
+                      <option key={templateId} value={templateId}>
+                        {template.name} ({template.brand})
+                      </option>
+                    )
+                  })}
+                </select>
+                {templates && templates.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No templates available for {brandForTemplates || 'this outcome'}. 
+                    <a href="/templates" className="text-primary underline ml-1">
+                      Create one
+                    </a>
+                  </p>
+                )}
+                {templatesLoading && (
+                  <p className="text-sm text-muted-foreground">
+                    Loading templates...
+                  </p>
+                )}
+                {templatesError && (
+                  <p className="text-sm text-destructive">
+                    Error loading templates: {templatesError instanceof Error ? templatesError.message : 'Unknown error'}
+                  </p>
+                )}
+                {templates && templates.length > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {templates.length} template(s) available
+                  </p>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="subject">Subject</Label>
                 <Input

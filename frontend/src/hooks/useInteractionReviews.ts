@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase, type InteractionReview } from '@/lib/supabase'
+import { supabase, type InteractionReview, type Template } from '@/lib/supabase'
 import { n8nApi } from '@/lib/n8n'
 
 export function useInteractionReviews(filters?: {
@@ -113,6 +113,27 @@ export function useApplyReview() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['interaction-reviews'] })
+    },
+  })
+}
+
+export function useTemplates(brand?: string) {
+  return useQuery({
+    queryKey: ['templates', brand],
+    queryFn: async () => {
+      let query = supabase
+        .from('templates')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (brand) {
+        query = query.eq('brand', brand)
+      }
+
+      const { data, error } = await query
+
+      if (error) throw error
+      return data as Template[]
     },
   })
 }
