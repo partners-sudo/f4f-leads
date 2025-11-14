@@ -15,6 +15,15 @@ export interface AISuggestReplyResponse {
   }>
 }
 
+// Raw response from n8n
+interface N8nChoicesResponse {
+  choices: Array<{
+    type: string
+    subject: string
+    body: string
+  }>
+}
+
 export interface ApplyReviewRequest {
   interaction_review_id: number | string
   chosen_subject: string
@@ -42,7 +51,30 @@ export const n8nApi = {
       throw new Error(`n8n API error: ${response.statusText}`)
     }
     
-    return response.json()
+    const rawResponse: N8nChoicesResponse = await response.json()
+    
+    // Transform n8n response format to expected format
+    const suggestions = rawResponse.choices.map((choice) => {
+      // Map type to outcome (case-insensitive matching)
+      const typeLower = choice.type.toLowerCase()
+      let outcome: 'f4f' | 'figgyz' | 'not_interested' = 'f4f'
+      
+      if (typeLower.includes('figgyz')) {
+        outcome = 'figgyz'
+      } else if (typeLower.includes('decline') || typeLower.includes('not interested')) {
+        outcome = 'not_interested'
+      } else if (typeLower.includes('first 4 figures') || typeLower.includes('f4f')) {
+        outcome = 'f4f'
+      }
+      
+      return {
+        subject: choice.subject,
+        body: choice.body,
+        outcome,
+      }
+    })
+    
+    return { suggestions }
   },
 
   async applyReview(data: ApplyReviewRequest): Promise<void> {
