@@ -82,7 +82,7 @@ export default function Reviews() {
                 <TableHead>Company</TableHead>
                 <TableHead>Inbound Snippet</TableHead>
                 <TableHead>Date of Reply</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>Outcome</TableHead>
                 <TableHead>Assigned To</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
