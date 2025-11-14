@@ -183,7 +183,7 @@ export default function ReviewDetail() {
                 onClick={() => {
                   if (outreachLog && outreachLog.message_snippet) {
                     getSuggestions({
-                      reply_text: outreachLog.message_snippet,
+                      reply_text: review.notes || '',
                       contact_id: outreachLog.contact_id,
                       company_id: outreachLog.company_id,
                     })
