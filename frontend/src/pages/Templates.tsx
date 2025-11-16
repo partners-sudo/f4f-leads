@@ -10,7 +10,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -68,23 +67,38 @@ export default function Templates() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
+      if (!id) {
+        throw new Error('Template ID is required for update')
+      }
+      
+      // Use upsert instead of update to avoid CORS PATCH issue
+      // Upsert with ID will update if exists (uses POST method which works)
       const { error } = await supabase
         .from('templates')
-        .update({
+        .upsert({
+          id: id,
           name: data.name,
           brand: data.brand,
           subject: data.subject,
           body: data.body,
           variables: data.variables || null,
         })
-        .eq('id', id)
-      if (error) throw error
+      
+      if (error) {
+        console.error('Failed to update template:', error)
+        throw error
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
       setIsDialogOpen(false)
       setEditingTemplate(null)
       setFormData({ name: '', brand: '', subject: '', body: '', variables: '' })
+    },
+    onError: (error: any) => {
+      console.error('Failed to update template:', error)
+      const errorMessage = error?.message || error?.toString() || 'Unknown error'
+      alert(`Failed to update template: ${errorMessage}`)
     },
   })
 
@@ -126,7 +140,16 @@ export default function Templates() {
           <h1 className="text-3xl font-bold">Templates</h1>
           <p className="text-muted-foreground">Manage email templates</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog 
+          open={isDialogOpen} 
+          onOpenChange={(open) => {
+            setIsDialogOpen(open)
+            if (!open) {
+              setEditingTemplate(null)
+              setFormData({ name: '', brand: '', subject: '', body: '', variables: '' })
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button onClick={() => {
               setEditingTemplate(null)
@@ -207,8 +230,14 @@ export default function Templates() {
                 />
               </div>
               <div className="flex gap-2">
-                <Button type="submit">
-                  {editingTemplate ? 'Update' : 'Create'}
+                <Button 
+                  type="submit"
+                  disabled={editingTemplate ? updateMutation.isPending : createMutation.isPending}
+                >
+                  {editingTemplate 
+                    ? (updateMutation.isPending ? 'Updating...' : 'Update')
+                    : (createMutation.isPending ? 'Creating...' : 'Create')
+                  }
                 </Button>
                 <Button
                   type="button"
