@@ -10,4 +10,7 @@ python-dotenv
 openai
 httpx
 dnspython
+PyPDF2
+pdfplumber
+schedule
 

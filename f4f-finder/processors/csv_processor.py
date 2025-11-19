@@ -1,0 +1,317 @@
+"""
+CSV and PDF processor for extracting shop data from files.
+"""
+import csv
+import re
+from typing import List, Dict, Optional
+from pathlib import Path
+import PyPDF2
+import pdfplumber
+from utils.logger import logger
+
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """
+    Extract text from PDF file.
+    
+    Args:
+        pdf_path: Path to PDF file
+        
+    Returns:
+        Extracted text
+    """
+    text = ""
+    
+    try:
+        # Try pdfplumber first (better for tables)
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+    except Exception as e:
+        logger.warning(f"pdfplumber failed, trying PyPDF2: {e}")
+        try:
+            # Fallback to PyPDF2
+            with open(pdf_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                for page in pdf_reader.pages:
+                    text += page.extract_text() or ""
+        except Exception as e2:
+            logger.error(f"Both PDF extraction methods failed: {e2}")
+            raise
+    
+    return text
+
+
+def parse_pdf_to_csv_data(pdf_path: str) -> List[Dict[str, str]]:
+    """
+    Parse PDF and extract shop data (name and address) from tables.
+    Uses pdfplumber to extract table data properly.
+    
+    Args:
+        pdf_path: Path to PDF file
+        
+    Returns:
+        List of dictionaries with 'name' and 'address' keys
+    """
+    shops = []
+    
+    # Keywords to skip (document headers, titles, etc.)
+    skip_keywords = [
+        'exhibit', 'service list', 'method of service', 'first class mail',
+        'name', 'address',  # Skip if these are header rows
+    ]
+    
+    try:
+        # Try to extract tables using pdfplumber (better for structured data)
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                # Try to extract tables
+                tables = page.extract_tables()
+                
+                if tables:
+                    for table in tables:
+                        # Skip empty tables
+                        if not table or len(table) < 2:
+                            continue
+                        
+                        # Find header row (usually first row)
+                        header_row = None
+                        name_col_idx = None
+                        address_col_idx = None
+                        
+                        # Look for header row with "Name" and "Address" columns
+                        for row_idx, row in enumerate(table[:5]):  # Check first 5 rows for header
+                            if not row:
+                                continue
+                            row_lower = [str(cell).lower() if cell else '' for cell in row]
+                            
+                            # Check if this looks like a header row
+                            if 'name' in row_lower and 'address' in row_lower:
+                                header_row = row_idx
+                                name_col_idx = row_lower.index('name')
+                                # Find address column (could be "Address" or similar)
+                                for idx, cell in enumerate(row_lower):
+                                    if 'address' in cell:
+                                        address_col_idx = idx
+                                        break
+                                break
+                        
+                        # If we found header, process data rows
+                        if name_col_idx is not None and address_col_idx is not None:
+                            start_row = header_row + 1 if header_row is not None else 1
+                            for row in table[start_row:]:
+                                if not row or len(row) <= max(name_col_idx, address_col_idx):
+                                    continue
+                                
+                                name = str(row[name_col_idx]).strip() if name_col_idx < len(row) else ''
+                                address = str(row[address_col_idx]).strip() if address_col_idx < len(row) else ''
+                                
+                                # Skip empty rows or header-like rows
+                                if not name or not address:
+                                    continue
+                                
+                                # Skip if name contains skip keywords (document headers)
+                                name_lower = name.lower()
+                                if any(keyword in name_lower for keyword in skip_keywords):
+                                    continue
+                                
+                                # Skip if address is just "First Class Mail" or similar
+                                address_lower = address.lower()
+                                if 'first class mail' in address_lower or 'method of service' in address_lower:
+                                    continue
+                                
+                                # Valid shop entry
+                                shops.append({
+                                    'name': name,
+                                    'address': address
+                                })
+                
+                # If no tables found, fall back to text extraction
+                if not shops:
+                    text = page.extract_text()
+                    if text:
+                        shops.extend(_parse_text_fallback(text, skip_keywords))
+        
+        # If pdfplumber didn't work, try fallback
+        if not shops:
+            logger.warning("No tables found with pdfplumber, trying text extraction fallback")
+            text = extract_text_from_pdf(pdf_path)
+            shops = _parse_text_fallback(text, skip_keywords)
+    
+    except Exception as e:
+        logger.warning(f"pdfplumber table extraction failed: {e}, trying text extraction")
+        text = extract_text_from_pdf(pdf_path)
+        shops = _parse_text_fallback(text, skip_keywords)
+    
+    logger.info(f"Extracted {len(shops)} shops from PDF")
+    return shops
+
+
+def _parse_text_fallback(text: str, skip_keywords: List[str]) -> List[Dict[str, str]]:
+    """
+    Fallback text parsing when table extraction fails.
+    """
+    shops = []
+    lines = text.split('\n')
+    current_shop = {}
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if current_shop.get('name') and current_shop.get('address'):
+                # Skip if name contains skip keywords
+                name_lower = current_shop['name'].lower()
+                if not any(keyword in name_lower for keyword in skip_keywords):
+                    shops.append(current_shop)
+            current_shop = {}
+            continue
+        
+        # Skip lines that are clearly headers
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in skip_keywords):
+            continue
+        
+        # Heuristic: if line looks like an address (contains numbers, street keywords, or ZIP codes)
+        is_address = (
+            bool(re.search(r'\d{5}(-\d{4})?', line)) or  # ZIP code pattern
+            (bool(re.search(r'\d+', line)) and any(
+                keyword in line_lower for keyword in ['street', 'st', 'avenue', 'ave', 'road', 'rd', 
+                                                     'drive', 'dr', 'lane', 'ln', 'blvd', 'boulevard',
+                                                     'cir', 'circle', 'way', 'ct', 'court']
+            ))
+        )
+        
+        # Heuristic: if line looks like a name (contains LLC, Inc, Corp, etc. or reasonable business name)
+        is_name = (
+            any(term in line_lower for term in ['llc', 'inc', 'corp', 'ltd', 'company', 'warehouse', 'cafe', 'shop', 'store']) or
+            (not bool(re.search(r'\d', line)) and 5 <= len(line) <= 100 and 
+             not any(keyword in line_lower for keyword in ['first class', 'method of service', 'exhibit']))
+        )
+        
+        if is_name and not current_shop.get('name'):
+            current_shop['name'] = line
+        elif is_address or (current_shop.get('name') and not current_shop.get('address')):
+            if 'address' not in current_shop:
+                current_shop['address'] = line
+            else:
+                current_shop['address'] += ', ' + line
+    
+    # Add last shop if exists
+    if current_shop.get('name') and current_shop.get('address'):
+        name_lower = current_shop['name'].lower()
+        if not any(keyword in name_lower for keyword in skip_keywords):
+            shops.append(current_shop)
+    
+    return shops
+
+
+def read_csv_file(csv_path: str) -> List[Dict[str, str]]:
+    """
+    Read CSV file and return list of dictionaries.
+    
+    Args:
+        csv_path: Path to CSV file
+        
+    Returns:
+        List of dictionaries with CSV data
+    """
+    shops = []
+    
+    with open(csv_path, 'r', encoding='utf-8') as file:
+        # Try to detect delimiter
+        sample = file.read(1024)
+        file.seek(0)
+        sniffer = csv.Sniffer()
+        delimiter = sniffer.sniff(sample).delimiter
+        
+        reader = csv.DictReader(file, delimiter=delimiter)
+        
+        for row in reader:
+            # Normalize column names (case-insensitive, handle spaces)
+            normalized_row = {}
+            for key, value in row.items():
+                normalized_key = key.strip().lower().replace(' ', '_')
+                normalized_row[normalized_key] = value.strip() if value else None
+            
+            shops.append(normalized_row)
+    
+    logger.info(f"Read {len(shops)} rows from CSV")
+    return shops
+
+
+def normalize_shop_data(shop: Dict[str, str]) -> Dict[str, Optional[str]]:
+    """
+    Normalize shop data to have consistent 'name' and 'address' fields.
+    
+    Args:
+        shop: Dictionary with shop data (may have various column names)
+        
+    Returns:
+        Normalized dictionary with 'name' and 'address' fields
+    """
+    normalized = {
+        'name': None,
+        'address': None
+    }
+    
+    # Try to find name field
+    name_fields = ['name', 'shop_name', 'store_name', 'business_name', 'company_name', 'company', 'shop', 'store']
+    for field in name_fields:
+        if field in shop and shop[field]:
+            normalized['name'] = shop[field].strip()
+            break
+    
+    # Try to find address field
+    address_fields = ['address', 'street_address', 'location', 'addr', 'full_address']
+    for field in address_fields:
+        if field in shop and shop[field]:
+            normalized['address'] = shop[field].strip()
+            break
+    
+    # If address is split across multiple fields, combine them
+    if not normalized['address']:
+        address_parts = []
+        address_part_fields = ['street', 'city', 'state', 'zip', 'postal_code', 'country']
+        for field in address_part_fields:
+            if field in shop and shop[field]:
+                address_parts.append(shop[field].strip())
+        if address_parts:
+            normalized['address'] = ', '.join(address_parts)
+    
+    return normalized
+
+
+def process_shop_file(file_path: str) -> List[Dict[str, Optional[str]]]:
+    """
+    Process a file (CSV or PDF) and extract shop data.
+    
+    Args:
+        file_path: Path to CSV or PDF file
+        
+    Returns:
+        List of normalized shop dictionaries with 'name' and 'address'
+    """
+    file_path_obj = Path(file_path)
+    
+    if not file_path_obj.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    file_ext = file_path_obj.suffix.lower()
+    
+    if file_ext == '.csv':
+        shops = read_csv_file(str(file_path_obj))
+    elif file_ext == '.pdf':
+        shops = parse_pdf_to_csv_data(str(file_path_obj))
+    else:
+        raise ValueError(f"Unsupported file type: {file_ext}. Supported: .csv, .pdf")
+    
+    # Normalize all shops
+    normalized_shops = []
+    for shop in shops:
+        normalized = normalize_shop_data(shop)
+        if normalized['name']:  # Only include shops with names
+            normalized_shops.append(normalized)
+    
+    logger.info(f"Processed {len(normalized_shops)} shops from {file_path}")
+    return normalized_shops
+

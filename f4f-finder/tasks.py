@@ -11,6 +11,8 @@ from scraper.marketplace_scraper import MarketplaceScraper
 
 from enrichment.clearbit_integration import enrich_company
 from enrichment.contact_verification import verify_contact
+from enrichment.domain_finder import find_domain
+from enrichment.email_finder import find_emails
 
 from utils.logger import logger
 
@@ -242,4 +244,167 @@ def verify_contacts(self, contact_ids=None, batch_size=100):
         
     except Exception as e:
         logger.error(f"Error in verify_contacts task: {e}")
+        raise self.retry(exc=e, countdown=60)
+
+def _process_shop_csv_impl(file_path: str, source: str = "csv_upload"):
+    """
+    Internal implementation of shop CSV processing (can be called directly or as Celery task).
+    
+    Args:
+        file_path: Path to CSV or PDF file
+        source: Source identifier for the companies (default: "csv_upload")
+        
+    Returns:
+        Dictionary with processing statistics
+    """
+    try:
+        from processors.csv_processor import process_shop_file
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"🚀 Starting CSV/PDF processing: {file_path}")
+        logger.info(f"{'='*60}\n")
+        
+        # Step 1: Process file and extract shop data
+        shops = process_shop_file(file_path)
+        logger.info(f"Extracted {len(shops)} shops from file")
+        
+        companies_saved = 0
+        contacts_saved = 0
+        errors = 0
+        
+        # Step 2: Process each shop
+        for idx, shop in enumerate(shops, 1):
+            try:
+                shop_name = shop.get('name')
+                shop_address = shop.get('address')
+                
+                if not shop_name:
+                    logger.warning(f"Shop {idx}: Skipping - no name")
+                    continue
+                
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Processing shop {idx}/{len(shops)}: {shop_name}")
+                logger.info(f"{'='*60}")
+                
+                # Step 2a: Find domain
+                domain = find_domain(shop_name, shop_address)
+                
+                # Step 2b: Create company record
+                company_data = {
+                    'name': shop_name,
+                    'domain': domain,
+                    'address': shop_address,  # Note: address might not be in schema, will be filtered
+                    'source': source,
+                }
+                
+                # Enrich company if domain found
+                if domain:
+                    enriched = enrich_company(domain)
+                    for key, value in enriched.items():
+                        if value and not company_data.get(key):
+                            company_data[key] = value
+                
+                # Filter to only include valid schema fields
+                filtered_company_data = filter_company_data(company_data)
+                
+                # Save/upsert company
+                company_response = sb.table('companies').upsert(filtered_company_data).execute()
+                
+                # Get company_id
+                company_id = None
+                if company_response.data and len(company_response.data) > 0:
+                    company_id = company_response.data[0].get('id')
+                    companies_saved += 1
+                else:
+                    # Fetch by domain or name
+                    if domain:
+                        fetch_response = sb.table('companies').select('id').eq('domain', domain).limit(1).execute()
+                    else:
+                        fetch_response = sb.table('companies').select('id').eq('name', shop_name).limit(1).execute()
+                    
+                    if fetch_response.data and len(fetch_response.data) > 0:
+                        company_id = fetch_response.data[0].get('id')
+                        companies_saved += 1
+                    else:
+                        logger.warning(f"Could not get company_id for: {shop_name}")
+                        errors += 1
+                        continue
+                
+                # Step 2c: Find emails if domain exists
+                if domain and company_id:
+                    logger.info(f"Finding emails for domain: {domain}")
+                    email_results = find_emails(domain, shop_name, verify=True)
+                    
+                    # Save contacts for each found email
+                    for email, score in email_results[:5]:  # Limit to top 5 emails per company
+                        contact_data = {
+                            'company_id': company_id,
+                            'name': None,  # We don't have contact names from CSV
+                            'email': email,
+                            'confidence_score': score,
+                        }
+                        
+                        # Verify the contact to get full verification
+                        verification_result = verify_contact(contact_data)
+                        contact_data.update({
+                            'email': verification_result['email'],
+                            'confidence_score': verification_result['confidence_score'],
+                            'last_validated': verification_result['last_validated']
+                        })
+                        
+                        # Filter to only include valid schema fields
+                        filtered_contact_data = filter_contact_data(contact_data)
+                        
+                        # Save contact
+                        sb.table('contacts').upsert(filtered_contact_data).execute()
+                        contacts_saved += 1
+                        logger.info(f"  ✓ Saved contact: {email} (score: {score:.2f})")
+                else:
+                    logger.warning(f"No domain found for {shop_name}, skipping email search")
+                
+                logger.info(f"✅ Completed shop {idx}/{len(shops)}: {shop_name}")
+                
+            except Exception as e:
+                logger.error(f"Error processing shop {idx} ({shop.get('name', 'unknown')}): {e}")
+                errors += 1
+                continue
+        
+        result = {
+            'total_shops': len(shops),
+            'companies_saved': companies_saved,
+            'contacts_saved': contacts_saved,
+            'errors': errors
+        }
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"✅ Processing complete!")
+        logger.info(f"   Total shops: {result['total_shops']}")
+        logger.info(f"   Companies saved: {result['companies_saved']}")
+        logger.info(f"   Contacts saved: {result['contacts_saved']}")
+        logger.info(f"   Errors: {result['errors']}")
+        logger.info(f"{'='*60}\n")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in process_shop_csv: {e}")
+        raise
+
+
+@app.task(bind=True, max_retries=3)
+def process_shop_csv(self, file_path: str, source: str = "csv_upload"):
+    """
+    Celery task wrapper for processing shop CSV files.
+    
+    Args:
+        file_path: Path to CSV or PDF file
+        source: Source identifier for the companies (default: "csv_upload")
+        
+    Returns:
+        Dictionary with processing statistics
+    """
+    try:
+        return _process_shop_csv_impl(file_path, source)
+    except Exception as e:
+        logger.error(f"Error in process_shop_csv task: {e}")
         raise self.retry(exc=e, countdown=60)
