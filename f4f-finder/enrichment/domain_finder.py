@@ -128,16 +128,28 @@ def generate_domain_candidates(company_name: str, address: Optional[str] = None)
         domain_variants.append(''.join(words))
         domain_variants.append('-'.join(words))
     
-    # Strategy 3: If address provided, try city + company name
+    # Strategy 3: If address provided, extract useful parts
     if address:
-        # Extract city from address (simple heuristic)
-        address_parts = address.split(',')
-        if len(address_parts) > 0:
-            city = address_parts[0].strip().lower()
-            city_clean = re.sub(r'[^a-z0-9]', '', city)
-            if city_clean and len(city_clean) > 2:
-                domain_variants.append(f"{city_clean}{name_clean}")
-                domain_variants.append(f"{city_clean}-{name_clean}")
+        # Handle multi-line addresses
+        address_lines = [line.strip() for line in address.split('\n') if line.strip()]
+        address_combined = ', '.join(address_lines)
+        address_parts = [part.strip() for part in address_combined.split(',')]
+        
+        # Extract city (usually second-to-last or third-to-last part)
+        if len(address_parts) >= 2:
+            # Try to find city (skip "Attn:" lines, street addresses with numbers)
+            for part in reversed(address_parts[-3:]):
+                part_clean = part.strip().lower()
+                # Skip if it's a country name, state code, or ZIP code
+                if (not re.search(r'\d{5}', part_clean) and 
+                    len(part_clean) > 2 and 
+                    part_clean not in ['us', 'usa', 'uk', 'ca', 'mx', 'gt'] and
+                    not part_clean.startswith('attn')):
+                    city_clean = re.sub(r'[^a-z0-9]', '', part_clean)
+                    if city_clean and len(city_clean) > 2:
+                        domain_variants.append(f"{city_clean}{name_clean}")
+                        domain_variants.append(f"{city_clean}-{name_clean}")
+                        break
     
     # Remove duplicates and empty strings
     candidates = list(set([c for c in domain_variants if c and len(c) > 2]))

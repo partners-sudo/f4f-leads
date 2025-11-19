@@ -13,6 +13,7 @@ from enrichment.clearbit_integration import enrich_company
 from enrichment.contact_verification import verify_contact
 from enrichment.domain_finder import find_domain
 from enrichment.email_finder import find_emails
+from utils.address_parser import parse_address
 
 from utils.logger import logger
 
@@ -286,16 +287,45 @@ def _process_shop_csv_impl(file_path: str, source: str = "csv_upload"):
                 logger.info(f"Processing shop {idx}/{len(shops)}: {shop_name}")
                 logger.info(f"{'='*60}")
                 
-                # Step 2a: Find domain
-                domain = find_domain(shop_name, shop_address)
+                # Step 1: Parse address to extract country and region
+                # Log raw address first to see what we got
+                logger.info(f"   Raw Address (length: {len(shop_address) if shop_address else 0}):")
+                if shop_address:
+                    # Show address with line breaks visible
+                    address_display = shop_address.replace('\n', ' | ')
+                    logger.info(f"      {address_display}")
+                
+                parsed_address = parse_address(shop_address) if shop_address else {}
+                country = parsed_address.get('country')
+                region = parsed_address.get('region')
+                full_address = parsed_address.get('full_address') or shop_address
+                
+                logger.info(f"   Full Address (parsed):")
+                if full_address:
+                    # Show full address with all parts
+                    address_lines = full_address.split('\n')
+                    for idx, line in enumerate(address_lines, 1):
+                        logger.info(f"      Part {idx}: {line}")
+                if country:
+                    logger.info(f"   Country: {country}")
+                if region:
+                    logger.info(f"   Region: {region}")
+                
+                # Step 2a: Find domain (use full address with country for better results)
+                domain = find_domain(shop_name, full_address)
                 
                 # Step 2b: Create company record
                 company_data = {
                     'name': shop_name,
                     'domain': domain,
-                    'address': shop_address,  # Note: address might not be in schema, will be filtered
                     'source': source,
                 }
+                
+                # Add country and region from parsed address
+                if country:
+                    company_data['country'] = country
+                if region:
+                    company_data['region'] = region
                 
                 # Enrich company if domain found
                 if domain:

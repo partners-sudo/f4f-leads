@@ -65,7 +65,7 @@ def parse_pdf_to_csv_data(pdf_path: str) -> List[Dict[str, str]]:
         # Try to extract tables using pdfplumber (better for structured data)
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                # Try to extract tables
+                # Extract tables with default settings (simpler and more reliable)
                 tables = page.extract_tables()
                 
                 if tables:
@@ -99,32 +99,108 @@ def parse_pdf_to_csv_data(pdf_path: str) -> List[Dict[str, str]]:
                         # If we found header, process data rows
                         if name_col_idx is not None and address_col_idx is not None:
                             start_row = header_row + 1 if header_row is not None else 1
-                            for row in table[start_row:]:
+                            row_idx = start_row
+                            while row_idx < len(table):
+                                row = table[row_idx]
                                 if not row or len(row) <= max(name_col_idx, address_col_idx):
+                                    row_idx += 1
                                     continue
                                 
                                 name = str(row[name_col_idx]).strip() if name_col_idx < len(row) else ''
-                                address = str(row[address_col_idx]).strip() if address_col_idx < len(row) else ''
+                                
+                                if not name:
+                                    row_idx += 1
+                                    continue
+                                
+                                # ALWAYS extract full address from page text to get ALL parts
+                                # Table extraction often misses multi-line addresses
+                                address_parts = []
+                                
+                                try:
+                                    # Get full page text
+                                    page_text = page.extract_text()
+                                    if page_text and name in page_text:
+                                        # Find the name in the text
+                                        name_pos = page_text.find(name)
+                                        if name_pos >= 0:
+                                            # Get a chunk of text after the name (enough for full address)
+                                            # Look for the next shop name or "Method of Service" to know where to stop
+                                            search_start = name_pos + len(name)
+                                            search_end = search_start + 1000  # Look ahead 1000 chars
+                                            
+                                            # Find where address ends (next shop name or "Method of Service")
+                                            next_name_pos = page_text.find('\n', search_start + 200)  # At least 200 chars for address
+                                            method_pos = page_text.find('Method of Service', search_start)
+                                            first_class_pos = page_text.find('First Class Mail', search_start)
+                                            
+                                            # Determine end position
+                                            end_positions = [p for p in [next_name_pos, method_pos, first_class_pos, search_end] if p > search_start]
+                                            end_pos = min(end_positions) if end_positions else search_end
+                                            
+                                            # Extract the address section
+                                            address_section = page_text[search_start:end_pos]
+                                            
+                                            # Split into lines and collect address parts
+                                            lines = address_section.split('\n')
+                                            for line in lines:
+                                                line = line.strip()
+                                                if not line or len(line) < 2:
+                                                    continue
+                                                
+                                                line_lower = line.lower()
+                                                
+                                                # Stop if we hit headers or next entry
+                                                if any(skip in line_lower for skip in ['name', 'address', 'method of service', 'first class mail']):
+                                                    # But only stop if we've already collected some address parts
+                                                    if len(address_parts) > 0:
+                                                        break
+                                                    continue
+                                                
+                                                # Collect this line as address part
+                                                address_parts.append(line)
+                                                
+                                                # Stop if we have enough parts (typically 4-5: Attn, Street, City, Country)
+                                                if len(address_parts) >= 5:
+                                                    break
+                                            
+                                            logger.debug(f"Extracted {len(address_parts)} address parts for {name}")
+                                except Exception as e:
+                                    logger.warning(f"Could not extract address from page text for {name}: {e}")
+                                    # Fallback: try to get from table cell
+                                    address_cell = row[address_col_idx] if address_col_idx < len(row) else ''
+                                    if address_cell:
+                                        if isinstance(address_cell, str):
+                                            address_parts = [l.strip() for l in address_cell.split('\n') if l.strip()]
+                                        else:
+                                            address_parts = [str(address_cell).strip()]
+                                
+                                # Combine all address parts
+                                address = '\n'.join(address_parts) if address_parts else ''
                                 
                                 # Skip empty rows or header-like rows
                                 if not name or not address:
+                                    row_idx += 1
                                     continue
                                 
                                 # Skip if name contains skip keywords (document headers)
                                 name_lower = name.lower()
                                 if any(keyword in name_lower for keyword in skip_keywords):
+                                    row_idx += 1
                                     continue
                                 
                                 # Skip if address is just "First Class Mail" or similar
                                 address_lower = address.lower()
                                 if 'first class mail' in address_lower or 'method of service' in address_lower:
+                                    row_idx += 1
                                     continue
                                 
-                                # Valid shop entry
+                                # Valid shop entry - combine all address parts
                                 shops.append({
                                     'name': name,
-                                    'address': address
+                                    'address': address  # Full multi-line address
                                 })
+                                
+                                row_idx += 1
                 
                 # If no tables found, fall back to text extraction
                 if not shops:
@@ -191,10 +267,12 @@ def _parse_text_fallback(text: str, skip_keywords: List[str]) -> List[Dict[str, 
         if is_name and not current_shop.get('name'):
             current_shop['name'] = line
         elif is_address or (current_shop.get('name') and not current_shop.get('address')):
+            # Build multi-line address
             if 'address' not in current_shop:
                 current_shop['address'] = line
             else:
-                current_shop['address'] += ', ' + line
+                # Keep as multi-line address (preserve structure)
+                current_shop['address'] += '\n' + line
     
     # Add last shop if exists
     if current_shop.get('name') and current_shop.get('address'):
