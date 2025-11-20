@@ -3,6 +3,7 @@ CSV and PDF processor for extracting shop data from files.
 """
 import csv
 import re
+import json
 from typing import List, Dict, Optional
 from pathlib import Path
 import PyPDF2
@@ -359,12 +360,71 @@ def normalize_shop_data(shop: Dict[str, str]) -> Dict[str, Optional[str]]:
     return normalized
 
 
-def process_shop_file(file_path: str) -> List[Dict[str, Optional[str]]]:
+def get_cache_file_path(file_path: str) -> Path:
+    """
+    Generate cache file path based on source file path.
+    
+    Args:
+        file_path: Path to source file
+        
+    Returns:
+        Path to cache file
+    """
+    file_path_obj = Path(file_path)
+    # Create cache file in same directory as source file
+    # e.g., D://shop_list.pdf -> D://shop_list_extracted.json
+    cache_name = file_path_obj.stem + "_extracted.json"
+    cache_path = file_path_obj.parent / cache_name
+    return cache_path
+
+
+def load_shops_from_cache(cache_path: Path) -> Optional[List[Dict[str, Optional[str]]]]:
+    """
+    Load extracted shops from cache file.
+    
+    Args:
+        cache_path: Path to cache file
+        
+    Returns:
+        List of shops if cache exists and is valid, None otherwise
+    """
+    if not cache_path.exists():
+        return None
+    
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            shops = json.load(f)
+        logger.info(f"✅ Loaded {len(shops)} shops from cache: {cache_path}")
+        return shops
+    except Exception as e:
+        logger.warning(f"Failed to load cache from {cache_path}: {e}")
+        return None
+
+
+def save_shops_to_cache(shops: List[Dict[str, Optional[str]]], cache_path: Path):
+    """
+    Save extracted shops to cache file.
+    
+    Args:
+        shops: List of shop dictionaries
+        cache_path: Path to cache file
+    """
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(shops, f, ensure_ascii=False, indent=2)
+        logger.info(f"💾 Saved {len(shops)} shops to cache: {cache_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save cache to {cache_path}: {e}")
+
+
+def process_shop_file(file_path: str, use_cache: bool = True) -> List[Dict[str, Optional[str]]]:
     """
     Process a file (CSV or PDF) and extract shop data.
+    Uses cache to avoid re-extracting if cache file exists and is newer than source.
     
     Args:
         file_path: Path to CSV or PDF file
+        use_cache: Whether to use cache if available (default: True)
         
     Returns:
         List of normalized shop dictionaries with 'name' and 'address'
@@ -374,8 +434,31 @@ def process_shop_file(file_path: str) -> List[Dict[str, Optional[str]]]:
     if not file_path_obj.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     
+    # Check cache first
+    if use_cache:
+        cache_path = get_cache_file_path(file_path)
+        
+        # Check if cache exists and is newer than source file
+        if cache_path.exists():
+            source_mtime = file_path_obj.stat().st_mtime
+            cache_mtime = cache_path.stat().st_mtime
+            
+            # If cache is newer or same age, use it
+            if cache_mtime >= source_mtime:
+                cached_shops = load_shops_from_cache(cache_path)
+                if cached_shops:
+                    return cached_shops
+                else:
+                    logger.info("Cache file exists but is invalid, re-extracting...")
+            else:
+                logger.info("Source file is newer than cache, re-extracting...")
+        else:
+            logger.info("No cache file found, extracting from source...")
+    
+    # Extract from source file
     file_ext = file_path_obj.suffix.lower()
     
+    logger.info(f"📄 Extracting shops from {file_path}...")
     if file_ext == '.csv':
         shops = read_csv_file(str(file_path_obj))
     elif file_ext == '.pdf':
@@ -391,5 +474,11 @@ def process_shop_file(file_path: str) -> List[Dict[str, Optional[str]]]:
             normalized_shops.append(normalized)
     
     logger.info(f"Processed {len(normalized_shops)} shops from {file_path}")
+    
+    # Save to cache
+    if use_cache:
+        cache_path = get_cache_file_path(file_path)
+        save_shops_to_cache(normalized_shops, cache_path)
+    
     return normalized_shops
 

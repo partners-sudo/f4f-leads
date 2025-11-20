@@ -21,6 +21,7 @@ pip install -r requirements.txt
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SERPER_API_KEY=your_serper_api_key  # Required for domain finding via Serper.dev
 REDIS_URL=redis://localhost:6379/0  # Optional, for Celery
 ```
 
@@ -114,18 +115,27 @@ The processor saves data to two Supabase tables:
 ### Domain Finding
 
 The domain finder uses multiple strategies:
-1. Generates domain candidates from company name
-2. Checks if domains exist (DNS lookup)
-3. Verifies domains are active (HTTP/HTTPS)
-4. Returns the first valid domain found
+1. **Primary**: Searches using Serper.dev API with company name + city/country
+   - Filters out directory sites (Yelp, Facebook, Tripadvisor, etc.)
+   - Returns the best homepage candidate + domain
+2. **Fallback**: Generates domain candidates from company name
+   - Checks if domains exist (DNS lookup)
+   - Verifies domains are active (HTTP/HTTPS)
+   - Returns the first valid domain found
 
 ### Email Finding
 
 The email finder uses multiple strategies:
-1. Scrapes website pages for email addresses
-2. Generates common email patterns (info@, contact@, etc.)
-3. Verifies all emails using DNS, MX records, and SMTP checks
-4. Returns verified emails sorted by confidence score
+1. **Primary**: Scrapes specific website pages for email addresses
+   - Visits: `/`, `/contact`, `/about`, `/impressum`
+   - Extracts emails using regex
+   - Filters out spammy/automated emails (noreply, notifications, etc.)
+2. **Fallback**: If no emails found, generates fallback guesses:
+   - `info@domain`
+   - `sales@domain`
+   - `contact@domain`
+3. **Verification**: Verifies all emails using DNS, MX records, and optional SMTP checks
+4. Returns verified emails sorted by confidence score (best match first)
 
 ## Troubleshooting
 

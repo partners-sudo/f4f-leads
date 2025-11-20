@@ -14,6 +14,7 @@ Create a `.env` file in the `f4f-finder` folder (or ensure your existing `.env` 
 ```env
 SUPABASE_URL=your_supabase_url_here
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+SERPER_API_KEY=your_serper_api_key_here  # Required for domain finding
 REDIS_URL=redis://localhost:6379/0  # Optional - only needed for async processing
 ```
 

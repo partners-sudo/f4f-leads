@@ -20,20 +20,27 @@ def main():
     # Default file path from user's request
     default_file = "D://shop_list.pdf"
     
-    # Get file path from command line argument or use default
-    if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-    else:
-        file_path = default_file
+    # Parse command line arguments
+    file_path = default_file
+    force_re_extract = False
+    
+    for arg in sys.argv[1:]:
+        if arg == '--force' or arg == '-f':
+            force_re_extract = True
+        elif not arg.startswith('-'):
+            file_path = arg
     
     # Check if file exists
     if not Path(file_path).exists():
         logger.error(f"File not found: {file_path}")
-        logger.info("Usage: python process_shop_list.py [path_to_file]")
+        logger.info("Usage: python process_shop_list.py [path_to_file] [--force]")
+        logger.info(f"  --force, -f: Force re-extraction (ignore cache)")
         logger.info(f"Default file: {default_file}")
         sys.exit(1)
     
     logger.info(f"Processing shop list from: {file_path}")
+    if force_re_extract:
+        logger.info("⚠️  Force re-extraction enabled (cache will be ignored)")
     
     # Check if Celery is configured
     redis_url = os.environ.get("REDIS_URL")
@@ -49,7 +56,8 @@ def main():
             # Import the implementation function and call it directly
             from tasks import _process_shop_csv_impl
             # Call the function directly (not as a Celery task)
-            result = _process_shop_csv_impl(file_path, source="csv_upload")
+            use_cache = not force_re_extract
+            result = _process_shop_csv_impl(file_path, source="csv_upload", use_cache=use_cache)
             logger.info("\n" + "="*60)
             logger.info("Processing Results:")
             logger.info(f"  Total shops: {result['total_shops']}")

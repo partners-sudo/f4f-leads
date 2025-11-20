@@ -247,13 +247,14 @@ def verify_contacts(self, contact_ids=None, batch_size=100):
         logger.error(f"Error in verify_contacts task: {e}")
         raise self.retry(exc=e, countdown=60)
 
-def _process_shop_csv_impl(file_path: str, source: str = "csv_upload"):
+def _process_shop_csv_impl(file_path: str, source: str = "csv_upload", use_cache: bool = True):
     """
     Internal implementation of shop CSV processing (can be called directly or as Celery task).
     
     Args:
         file_path: Path to CSV or PDF file
         source: Source identifier for the companies (default: "csv_upload")
+        use_cache: Whether to use cache if available (default: True)
         
     Returns:
         Dictionary with processing statistics
@@ -266,7 +267,7 @@ def _process_shop_csv_impl(file_path: str, source: str = "csv_upload"):
         logger.info(f"{'='*60}\n")
         
         # Step 1: Process file and extract shop data
-        shops = process_shop_file(file_path)
+        shops = process_shop_file(file_path, use_cache=use_cache)
         logger.info(f"Extracted {len(shops)} shops from file")
         
         companies_saved = 0

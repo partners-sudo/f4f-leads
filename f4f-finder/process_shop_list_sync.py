@@ -12,9 +12,14 @@ from utils.logger import logger
 load_dotenv()
 
 
-def process_shop_file_sync(file_path: str, source: str = "csv_upload"):
+def process_shop_file_sync(file_path: str, source: str = "csv_upload", use_cache: bool = True):
     """
     Process shop file synchronously (direct execution, no Celery).
+    
+    Args:
+        file_path: Path to CSV or PDF file
+        source: Source identifier for the companies (default: "csv_upload")
+        use_cache: Whether to use cache if available (default: True)
     """
     from processors.csv_processor import process_shop_file
     from enrichment.domain_finder import find_domain
@@ -46,7 +51,7 @@ def process_shop_file_sync(file_path: str, source: str = "csv_upload"):
     logger.info(f"{'='*60}\n")
     
     # Step 1: Process file and extract shop data
-    shops = process_shop_file(file_path)
+    shops = process_shop_file(file_path, use_cache=use_cache)
     logger.info(f"Extracted {len(shops)} shops from file")
     
     companies_saved = 0
@@ -176,24 +181,32 @@ def main():
     # Default file path from user's request
     default_file = "D://shop_list.pdf"
     
-    # Get file path from command line argument or use default
-    if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-    else:
-        file_path = default_file
+    # Parse command line arguments
+    file_path = default_file
+    force_re_extract = False
+    
+    for arg in sys.argv[1:]:
+        if arg == '--force' or arg == '-f':
+            force_re_extract = True
+        elif not arg.startswith('-'):
+            file_path = arg
     
     # Check if file exists
     if not Path(file_path).exists():
         logger.error(f"File not found: {file_path}")
-        logger.info("Usage: python process_shop_list_sync.py [path_to_file]")
+        logger.info("Usage: python process_shop_list_sync.py [path_to_file] [--force]")
+        logger.info(f"  --force, -f: Force re-extraction (ignore cache)")
         logger.info(f"Default file: {default_file}")
         sys.exit(1)
     
     logger.info(f"Processing shop list from: {file_path}")
     logger.info("Running synchronously (no Celery required)")
+    if force_re_extract:
+        logger.info("⚠️  Force re-extraction enabled (cache will be ignored)")
     
     try:
-        result = process_shop_file_sync(file_path, source="csv_upload")
+        use_cache = not force_re_extract
+        result = process_shop_file_sync(file_path, source="csv_upload", use_cache=use_cache)
         logger.info("\n" + "="*60)
         logger.info("Processing Results:")
         logger.info(f"  Total shops: {result['total_shops']}")
