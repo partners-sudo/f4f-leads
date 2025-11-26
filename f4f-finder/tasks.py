@@ -20,7 +20,7 @@ from utils.logger import logger
 # Valid fields for companies table (excluding auto-generated fields like id, created_at, updated_at)
 VALID_COMPANY_FIELDS = {
     'name', 'domain', 'country', 'region', 'type', 'source', 
-    'brand_focus', 'status', 'freshness_timestamp'
+    'brand_focus', 'status', 'freshness_timestamp', 'product_overlap'
 }
 
 # Valid fields for contacts table (excluding auto-generated fields like id, created_at, updated_at)
@@ -438,4 +438,41 @@ def process_shop_csv(self, file_path: str, source: str = "csv_upload"):
         return _process_shop_csv_impl(file_path, source)
     except Exception as e:
         logger.error(f"Error in process_shop_csv task: {e}")
+        raise self.retry(exc=e, countdown=60)
+
+
+@app.task(bind=True, max_retries=3)
+def discover_competitors(self, brand_names: list):
+    """
+    Celery task for competitor discovery.
+    
+    Args:
+        brand_names: List of brand names to search for (e.g., ["Funko", "Tubbz", "Cable guys"])
+        
+    Returns:
+        Dictionary with discovery and save statistics
+    """
+    try:
+        # Lazy import to avoid circular dependency
+        from discovery.competitor_discovery import CompetitorDiscovery
+        
+        discovery = CompetitorDiscovery(brand_names)
+        
+        # Run discovery (async)
+        discovery_stats = run_async(discovery.discover_all())
+        
+        # Save to Supabase (async)
+        save_stats = run_async(discovery.save_to_supabase())
+        
+        # Generate report
+        report = discovery.generate_report(discovery_stats, save_stats)
+        logger.info("\n" + report)
+        
+        return {
+            'discovery_stats': discovery_stats,
+            'save_stats': save_stats,
+            'report': report
+        }
+    except Exception as e:
+        logger.error(f"Error in discover_competitors task: {e}")
         raise self.retry(exc=e, countdown=60)
