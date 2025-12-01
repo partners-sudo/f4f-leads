@@ -1,4 +1,4 @@
-const FINDER_BASE_URL = import.meta.env.VITE_FINDER_BASE_URL ?? 'http://localhost:8001'
+export const FINDER_BASE_URL = import.meta.env.VITE_FINDER_BASE_URL ?? 'http://localhost:8001'
 
 export interface ScrapeResult {
   status: string

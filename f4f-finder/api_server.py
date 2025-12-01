@@ -1,4 +1,7 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Request
+from starlette.responses import StreamingResponse
+import asyncio
+import json
 import logging
 from io import StringIO
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,6 +69,63 @@ def scrape_linkedin(payload: LinkedinScrapeRequest):
         logger.removeHandler(handler)
     logs_value = log_stream.getvalue()
     return ScrapeResponse(status="SUCCESS", result=result, logs=logs_value or None)
+
+
+@app.get("/scrape/linkedin/stream")
+async def stream_linkedin(keyword: str, request: Request):
+    """Server-Sent Events stream for LinkedIn scraping logs and final result."""
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    class QueueLogHandler(logging.Handler):  # type: ignore[misc]
+        def emit(self, record: logging.LogRecord) -> None:
+            try:
+                msg = self.format(record)
+                queue.put_nowait(msg)
+            except Exception:
+                pass
+
+    handler = QueueLogHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger = logging.getLogger("finder")
+    logger.addHandler(handler)
+
+    async def run_task() -> dict:
+        loop = asyncio.get_event_loop()
+
+        def _run() -> dict:
+            result = scrape_linkedin_companies(keyword)
+            if not isinstance(result, dict):
+                return {"raw_result": result}
+            return result
+
+        try:
+            return await loop.run_in_executor(None, _run)
+        finally:
+            logger.removeHandler(handler)
+            await queue.put(None)
+
+    task = asyncio.create_task(run_task())
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    task.cancel()
+                    break
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"event: log\ndata: {item}\n\n"
+
+            result = await task
+            payload = json.dumps(result)
+            yield f"event: result\ndata: {payload}\n\n"
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.options("/scrape/competitors")
