@@ -5,7 +5,7 @@ import { FINDER_BASE_URL, finderApi } from '@/lib/finder'
 function ScrapingConsole() {
   const [linkedinKeyword, setLinkedinKeyword] = useState('retail buyer')
   const [competitorBrands, setCompetitorBrands] = useState('Funko, Tubbz, Cable guys')
-  const [csvPath, setCsvPath] = useState('')
+  const [csvPath, setCsvPath] = useState('D://shop_list.pdf')
   const [csvSource, setCsvSource] = useState('csv_upload')
 
   const [activeTab, setActiveTab] = useState<'linkedin' | 'competitors' | 'csv'>('linkedin')
@@ -13,6 +13,9 @@ function ScrapingConsole() {
   const [linkedinResult, setLinkedinResult] = useState<ScrapeResult | null>(null)
   const [competitorResult, setCompetitorResult] = useState<ScrapeResult | null>(null)
   const [csvResult, setCsvResult] = useState<ScrapeResult | null>(null)
+  const [linkedinRunId, setLinkedinRunId] = useState<string | null>(null)
+  const [competitorRunId, setCompetitorRunId] = useState<string | null>(null)
+  const [csvRunId, setCsvRunId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,6 +64,7 @@ function ScrapingConsole() {
       setLoading(true)
       setLinkedinResult(null)
       setLinkedinLogs('')
+      setLinkedinRunId(null)
       linkedinSourceRef.current?.close()
 
       const url = `${FINDER_BASE_URL}/scrape/linkedin/stream?keyword=${encodeURIComponent(
@@ -68,6 +72,11 @@ function ScrapingConsole() {
       )}`
       const es = new EventSource(url)
       linkedinSourceRef.current = es
+
+      es.addEventListener('run_id', (event) => {
+        const e = event as MessageEvent
+        setLinkedinRunId(String(e.data))
+      })
 
       es.addEventListener('log', (event) => {
         const e = event as MessageEvent
@@ -111,6 +120,7 @@ function ScrapingConsole() {
       setLoading(true)
       setCompetitorResult(null)
       setCompetitorLogs('')
+      setCompetitorRunId(null)
       competitorSourceRef.current?.close()
 
       const url = `${FINDER_BASE_URL}/scrape/competitors/stream?brands=${encodeURIComponent(
@@ -118,6 +128,11 @@ function ScrapingConsole() {
       )}`
       const es = new EventSource(url)
       competitorSourceRef.current = es
+
+      es.addEventListener('run_id', (event) => {
+        const e = event as MessageEvent
+        setCompetitorRunId(String(e.data))
+      })
 
       es.addEventListener('log', (event) => {
         const e = event as MessageEvent
@@ -158,6 +173,7 @@ function ScrapingConsole() {
       setLoading(true)
       setCsvResult(null)
       setCsvLogs('')
+      setCsvRunId(null)
       csvSourceRef.current?.close()
 
       const params = new URLSearchParams({
@@ -167,6 +183,11 @@ function ScrapingConsole() {
       const url = `${FINDER_BASE_URL}/scrape/csv/stream?${params.toString()}`
       const es = new EventSource(url)
       csvSourceRef.current = es
+
+      es.addEventListener('run_id', (event) => {
+        const e = event as MessageEvent
+        setCsvRunId(String(e.data))
+      })
 
       es.addEventListener('log', (event) => {
         const e = event as MessageEvent
@@ -260,10 +281,22 @@ function ScrapingConsole() {
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
                     type="button"
-                    onClick={() => {
-                      linkedinSourceRef.current?.close()
-                      linkedinSourceRef.current = null
-                      setLoading(false)
+                    onClick={async () => {
+                      try {
+                        if (linkedinRunId) {
+                          await fetch(`${FINDER_BASE_URL}/scrape/linkedin/cancel`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ run_id: linkedinRunId }),
+                          })
+                        }
+                      } catch {
+                        // ignore cancel errors in UI
+                      } finally {
+                        linkedinSourceRef.current?.close()
+                        linkedinSourceRef.current = null
+                        setLoading(false)
+                      }
                     }}
                   >
                     Cancel
@@ -334,10 +367,22 @@ function ScrapingConsole() {
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
                     type="button"
-                    onClick={() => {
-                      competitorSourceRef.current?.close()
-                      competitorSourceRef.current = null
-                      setLoading(false)
+                    onClick={async () => {
+                      try {
+                        if (competitorRunId) {
+                          await fetch(`${FINDER_BASE_URL}/scrape/competitors/cancel`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ run_id: competitorRunId }),
+                          })
+                        }
+                      } catch {
+                        // ignore cancel errors in UI
+                      } finally {
+                        competitorSourceRef.current?.close()
+                        competitorSourceRef.current = null
+                        setLoading(false)
+                      }
                     }}
                   >
                     Cancel
@@ -395,6 +440,7 @@ function ScrapingConsole() {
                   placeholder="File path on server"
                   value={csvPath}
                   onChange={(e) => setCsvPath(e.target.value)}
+                  disabled={true}
                 />
                 <input
                   className="w-full border rounded px-2 py-1 text-sm"
@@ -414,10 +460,22 @@ function ScrapingConsole() {
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
                     type="button"
-                    onClick={() => {
-                      csvSourceRef.current?.close()
-                      csvSourceRef.current = null
-                      setLoading(false)
+                    onClick={async () => {
+                      try {
+                        if (csvRunId) {
+                          await fetch(`${FINDER_BASE_URL}/scrape/csv/cancel`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ run_id: csvRunId }),
+                          })
+                        }
+                      } catch {
+                        // ignore cancel errors in UI
+                      } finally {
+                        csvSourceRef.current?.close()
+                        csvSourceRef.current = null
+                        setLoading(false)
+                      }
                     }}
                   >
                     Cancel

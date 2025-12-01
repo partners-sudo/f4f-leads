@@ -17,6 +17,36 @@ from utils.address_parser import parse_address
 
 from utils.logger import logger
 
+
+# Cooperative cancellation flags keyed by run_id. These are used when scrapes
+# are invoked directly from the FastAPI app (not via Celery workers) so that
+# an API endpoint can signal a running scrape to exit early.
+CANCEL_FLAGS: dict[str, bool] = {}
+
+
+def request_cancel(run_id: str) -> None:
+    """Mark a given run_id as cancelled.
+
+    The actual scrapers must periodically call is_cancelled(run_id) and
+    respect the flag by exiting their main loops.
+    """
+
+    if run_id:
+        CANCEL_FLAGS[run_id] = True
+
+
+def is_cancelled(run_id: str | None) -> bool:
+    """Check if the given run_id has been cancelled."""
+
+    return bool(run_id) and CANCEL_FLAGS.get(run_id, False)
+
+
+def clear_cancel(run_id: str | None) -> None:
+    """Clear the cancel flag when a run finishes (success or error)."""
+
+    if run_id:
+        CANCEL_FLAGS.pop(run_id, None)
+
 # Valid fields for companies table (excluding auto-generated fields like id, created_at, updated_at)
 VALID_COMPANY_FIELDS = {
     'name', 'domain', 'country', 'region', 'type', 'source', 
@@ -70,7 +100,7 @@ def scrape_competitor_partners(self, url, source="competitor"):
         raise self.retry(exc=e, countdown=60)
 
 @app.task(bind=True)
-def scrape_linkedin_companies(self, keyword):
+def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
     try:
         scraper = LinkedInScraper(keyword)
         results = run_async(scraper.extract_contacts())
@@ -79,6 +109,9 @@ def scrape_linkedin_companies(self, keyword):
         contacts_saved = 0
         
         for result in results:
+            if is_cancelled(run_id):
+                logger.info("LinkedIn scrape cancelled by user, stopping early.")
+                break
             try:
                 # Extract company and contact data
                 company_data = result.get("company", {})
@@ -144,13 +177,18 @@ def scrape_linkedin_companies(self, keyword):
                 logger.error(f"Error saving company/contact record: {e}")
                 continue
         
-        return {
+        result_summary = {
             'companies_saved': companies_saved,
             'contacts_saved': contacts_saved,
-            'total_processed': len(results)
+            'total_processed': len(results),
         }
+        if is_cancelled(run_id):
+            result_summary['cancelled'] = True
+        return result_summary
     except Exception as e:
         raise self.retry(exc=e, countdown=60)
+    finally:
+        clear_cancel(run_id)
 
 @app.task(bind=True)
 def scrape_marketplaces(self, marketplace_url):
@@ -242,7 +280,12 @@ def verify_contacts(self, contact_ids=None, batch_size=100):
         logger.error(f"Error in verify_contacts task: {e}")
         raise self.retry(exc=e, countdown=60)
 
-def _process_shop_csv_impl(file_path: str, source: str = "csv_upload", use_cache: bool = True):
+def _process_shop_csv_impl(
+    file_path: str,
+    source: str = "csv_upload",
+    use_cache: bool = True,
+    run_id: str | None = None,
+):
     """
     Internal implementation of shop CSV processing (can be called directly or as Celery task).
     
@@ -271,6 +314,9 @@ def _process_shop_csv_impl(file_path: str, source: str = "csv_upload", use_cache
         
         # Step 2: Process each shop
         for idx, shop in enumerate(shops, 1):
+            if is_cancelled(run_id):
+                logger.info("CSV/PDF processing cancelled by user, stopping early.")
+                break
             try:
                 shop_name = shop.get('name')
                 shop_address = shop.get('address')
@@ -399,8 +445,10 @@ def _process_shop_csv_impl(file_path: str, source: str = "csv_upload", use_cache
             'total_shops': len(shops),
             'companies_saved': companies_saved,
             'contacts_saved': contacts_saved,
-            'errors': errors
+            'errors': errors,
         }
+        if is_cancelled(run_id):
+            result['cancelled'] = True
         
         logger.info(f"\n{'='*60}")
         logger.info(f"✅ Processing complete!")
@@ -411,14 +459,16 @@ def _process_shop_csv_impl(file_path: str, source: str = "csv_upload", use_cache
         logger.info(f"{'='*60}\n")
         
         return result
-        
+
     except Exception as e:
         logger.error(f"Error in process_shop_csv: {e}")
         raise
+    finally:
+        clear_cancel(run_id)
 
 
 @app.task(bind=True, max_retries=3)
-def process_shop_csv(self, file_path: str, source: str = "csv_upload"):
+def process_shop_csv(self, file_path: str, source: str = "csv_upload", run_id: str | None = None):
     """
     Celery task wrapper for processing shop CSV files.
     
@@ -430,14 +480,14 @@ def process_shop_csv(self, file_path: str, source: str = "csv_upload"):
         Dictionary with processing statistics
     """
     try:
-        return _process_shop_csv_impl(file_path, source)
+        return _process_shop_csv_impl(file_path, source, run_id=run_id)
     except Exception as e:
         logger.error(f"Error in process_shop_csv task: {e}")
         raise self.retry(exc=e, countdown=60)
 
 
 @app.task(bind=True, max_retries=3)
-def discover_competitors(self, brand_names: list):
+def discover_competitors(self, brand_names: list, run_id: str | None = None):
     """
     Celery task for competitor discovery.
     
@@ -455,7 +505,17 @@ def discover_competitors(self, brand_names: list):
         
         # Run discovery (async)
         discovery_stats = run_async(discovery.discover_all())
-        
+
+        if is_cancelled(run_id):
+            logger.info("Competitor discovery cancelled by user after discovery phase.")
+            clear_cancel(run_id)
+            return {
+                'discovery_stats': discovery_stats,
+                'save_stats': None,
+                'report': 'Cancelled before save_to_supabase',
+                'cancelled': True,
+            }
+
         # Save to Supabase (async)
         save_stats = run_async(discovery.save_to_supabase())
         
@@ -463,11 +523,16 @@ def discover_competitors(self, brand_names: list):
         report = discovery.generate_report(discovery_stats, save_stats)
         logger.info("\n" + report)
         
-        return {
+        result = {
             'discovery_stats': discovery_stats,
             'save_stats': save_stats,
-            'report': report
+            'report': report,
         }
+        if is_cancelled(run_id):
+            result['cancelled'] = True
+        return result
     except Exception as e:
         logger.error(f"Error in discover_competitors task: {e}")
         raise self.retry(exc=e, countdown=60)
+    finally:
+        clear_cancel(run_id)

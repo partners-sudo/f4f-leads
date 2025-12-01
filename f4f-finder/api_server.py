@@ -6,10 +6,12 @@ import logging
 from io import StringIO
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import uuid
 from tasks import (
     scrape_linkedin_companies,
     discover_competitors,
     process_shop_csv,
+    request_cancel,
 )
 
 
@@ -32,7 +34,13 @@ class ScrapeResponse(BaseModel):
     logs: str | None = None
 
 
+class CancelRequest(BaseModel):
+    run_id: str
+
+
 app = FastAPI()
+
+RUN_TASKS: dict[str, asyncio.Task] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,11 +99,13 @@ async def stream_competitors(brands: str, request: Request):
     logger = logging.getLogger("finder")
     logger.addHandler(handler)
 
+    run_id = uuid.uuid4().hex
+
     async def run_task() -> dict:
         loop = asyncio.get_event_loop()
 
         def _run() -> dict:
-            result = discover_competitors(brand_list)
+            result = discover_competitors(brand_list, run_id=run_id)
             if not isinstance(result, dict):
                 return {"raw_result": result}
             return result
@@ -107,11 +117,15 @@ async def stream_competitors(brands: str, request: Request):
             await queue.put(None)
 
     task = asyncio.create_task(run_task())
+    RUN_TASKS[run_id] = task
 
     async def event_generator():
         try:
+            # First send the run_id so the frontend can cancel this run later
+            yield f"event: run_id\ndata: {run_id}\n\n"
             while True:
                 if await request.is_disconnected():
+                    await request_cancel(run_id)
                     task.cancel()
                     break
                 item = await queue.get()
@@ -125,6 +139,8 @@ async def stream_competitors(brands: str, request: Request):
         except asyncio.CancelledError:
             task.cancel()
             raise
+        finally:
+            RUN_TASKS.pop(run_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -148,11 +164,13 @@ async def stream_linkedin(keyword: str, request: Request):
     logger = logging.getLogger("finder")
     logger.addHandler(handler)
 
+    run_id = uuid.uuid4().hex
+
     async def run_task() -> dict:
         loop = asyncio.get_event_loop()
 
         def _run() -> dict:
-            result = scrape_linkedin_companies(keyword)
+            result = scrape_linkedin_companies(keyword, run_id=run_id)
             if not isinstance(result, dict):
                 return {"raw_result": result}
             return result
@@ -163,10 +181,14 @@ async def stream_linkedin(keyword: str, request: Request):
             logger.removeHandler(handler)
             await queue.put(None)
 
+    run_id = uuid.uuid4().hex
     task = asyncio.create_task(run_task())
+    RUN_TASKS[run_id] = task
 
     async def event_generator():
         try:
+            # First send the run_id so the frontend can cancel this run later
+            yield f"event: run_id\ndata: {run_id}\n\n"
             while True:
                 if await request.is_disconnected():
                     task.cancel()
@@ -182,6 +204,8 @@ async def stream_linkedin(keyword: str, request: Request):
         except asyncio.CancelledError:
             task.cancel()
             raise
+        finally:
+            RUN_TASKS.pop(run_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -256,11 +280,13 @@ async def stream_csv(request: Request, file_path: str, source: str | None = None
     logger = logging.getLogger("finder")
     logger.addHandler(handler)
 
+    run_id = uuid.uuid4().hex
+
     async def run_task() -> dict:
         loop = asyncio.get_event_loop()
 
         def _run() -> dict:
-            result = process_shop_csv(file_path, src)
+            result = process_shop_csv(file_path, src, run_id=run_id)
             if not isinstance(result, dict):
                 return {"raw_result": result}
             return result
@@ -271,10 +297,14 @@ async def stream_csv(request: Request, file_path: str, source: str | None = None
             logger.removeHandler(handler)
             await queue.put(None)
 
+    run_id = uuid.uuid4().hex
     task = asyncio.create_task(run_task())
+    RUN_TASKS[run_id] = task
 
     async def event_generator():
         try:
+            # First send the run_id so the frontend can cancel this run later
+            yield f"event: run_id\ndata: {run_id}\n\n"
             while True:
                 if await request.is_disconnected():
                     task.cancel()
@@ -290,5 +320,34 @@ async def stream_csv(request: Request, file_path: str, source: str | None = None
         except asyncio.CancelledError:
             task.cancel()
             raise
+        finally:
+            RUN_TASKS.pop(run_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/scrape/linkedin/cancel")
+async def cancel_linkedin(payload: CancelRequest):
+    request_cancel(payload.run_id)
+    task = RUN_TASKS.pop(payload.run_id, None)
+    if task is not None:
+        task.cancel()
+    return {"status": "CANCEL_REQUESTED"}
+
+
+@app.post("/scrape/competitors/cancel")
+async def cancel_competitors(payload: CancelRequest):
+    request_cancel(payload.run_id)
+    task = RUN_TASKS.pop(payload.run_id, None)
+    if task is not None:
+        task.cancel()
+    return {"status": "CANCEL_REQUESTED"}
+
+
+@app.post("/scrape/csv/cancel")
+async def cancel_csv(payload: CancelRequest):
+    request_cancel(payload.run_id)
+    task = RUN_TASKS.pop(payload.run_id, None)
+    if task is not None:
+        task.cancel()
+    return {"status": "CANCEL_REQUESTED"}
