@@ -15,6 +15,7 @@ import ReviewDetail from '@/pages/ReviewDetail'
 import Templates from '@/pages/Templates'
 import MergeCandidates from '@/pages/MergeCandidates'
 import ErpSync from '@/pages/ErpSync'
+import ScrapingConsole from '@/pages/ScrapingConsole'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -131,6 +132,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ErpSync />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/scraping"
+              element={
+                <ProtectedRoute>
+                  <ScrapingConsole />
                 </ProtectedRoute>
               }
             />

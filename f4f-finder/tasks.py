@@ -39,24 +39,19 @@ def filter_contact_data(data):
 
 
 def run_async(coro):
-    """Helper function to run async code in Celery tasks, handling event loop creation."""
+    """Helper function to run async code in Celery tasks.
+
+    Always executes the coroutine in a fresh event loop to avoid
+    "event loop is already running" errors when called from contexts
+    that already have an active loop (e.g. FastAPI/uvicorn).
+    """
+    loop = asyncio.new_event_loop()
     try:
-        # Try to get the existing event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError("Event loop is closed")
-        # If loop exists and is not closed, use it
-        return loop.run_until_complete(coro)
-    except RuntimeError:
-        # No event loop exists in this thread (common during Celery retries)
-        # Create a new event loop for this thread
-        loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 @app.task(bind=True, max_retries=3)

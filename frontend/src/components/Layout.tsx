@@ -22,6 +22,7 @@ const navigation = [
   { name: 'Templates', href: '/templates', icon: FileText },
   { name: 'Merge Candidates', href: '/merge', icon: GitMerge },
   { name: 'ERP Sync', href: '/erp-sync', icon: Settings },
+  { name: 'Scraping', href: '/scraping', icon: FileText },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {

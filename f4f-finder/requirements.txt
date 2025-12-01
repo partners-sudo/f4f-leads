@@ -13,4 +13,5 @@ dnspython
 PyPDF2
 pdfplumber
 schedule
-
+fastapi
+uvicorn[standard]
