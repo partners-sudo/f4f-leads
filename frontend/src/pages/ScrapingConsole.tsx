@@ -3,7 +3,7 @@ import type { ScrapeResult } from '@/lib/finder'
 import { FINDER_BASE_URL, finderApi } from '@/lib/finder'
 
 function ScrapingConsole() {
-  const [linkedinKeyword, setLinkedinKeyword] = useState('')
+  const [linkedinKeyword, setLinkedinKeyword] = useState('retail buyer')
   const [competitorBrands, setCompetitorBrands] = useState('Funko, Tubbz, Cable guys')
   const [csvPath, setCsvPath] = useState('')
   const [csvSource, setCsvSource] = useState('csv_upload')
@@ -247,6 +247,7 @@ function ScrapingConsole() {
                   placeholder="Keyword (e.g. retail buyer)"
                   value={linkedinKeyword}
                   onChange={(e) => setLinkedinKeyword(e.target.value)}
+                  disabled={true}
                 />
                 <button
                   className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
@@ -255,6 +256,19 @@ function ScrapingConsole() {
                 >
                   Run LinkedIn Scrape
                 </button>
+                {linkedinSourceRef.current && (
+                  <button
+                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    type="button"
+                    onClick={() => {
+                      linkedinSourceRef.current?.close()
+                      linkedinSourceRef.current = null
+                      setLoading(false)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
                 {linkedinResult && (
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
@@ -307,6 +321,7 @@ function ScrapingConsole() {
                   placeholder="Brands (comma separated)"
                   value={competitorBrands}
                   onChange={(e) => setCompetitorBrands(e.target.value)}
+                  disabled={true}
                 />
                 <button
                   className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
@@ -315,6 +330,19 @@ function ScrapingConsole() {
                 >
                   Run Competitor Scrape
                 </button>
+                {competitorSourceRef.current && (
+                  <button
+                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    type="button"
+                    onClick={() => {
+                      competitorSourceRef.current?.close()
+                      competitorSourceRef.current = null
+                      setLoading(false)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
                 {competitorResult && (
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
@@ -373,6 +401,7 @@ function ScrapingConsole() {
                   placeholder="Source tag (e.g. csv_upload)"
                   value={csvSource}
                   onChange={(e) => setCsvSource(e.target.value)}
+                  disabled={true}
                 />
                 <button
                   className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
@@ -381,6 +410,19 @@ function ScrapingConsole() {
                 >
                   Run CSV Scrape
                 </button>
+                {csvSourceRef.current && (
+                  <button
+                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    type="button"
+                    onClick={() => {
+                      csvSourceRef.current?.close()
+                      csvSourceRef.current = null
+                      setLoading(false)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
                 {csvResult && (
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
