@@ -103,20 +103,22 @@ def scrape_competitor_partners(self, url, source="competitor"):
 def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
     try:
         scraper = LinkedInScraper(keyword)
-        results = run_async(scraper.extract_contacts())
-        
         companies_saved = 0
         contacts_saved = 0
-        
-        for result in results:
+
+        async def handle_result(result):
+            nonlocal companies_saved, contacts_saved
+
             if is_cancelled(run_id):
-                logger.info("LinkedIn scrape cancelled by user, stopping early.")
-                break
+                logger.info("LinkedIn scrape cancelled by user, stopping early via callback.")
+                # Returning True signals the scraper to stop processing further companies
+                return True
+
             try:
                 # Extract company and contact data
                 company_data = result.get("company", {})
                 contact_data = result.get("contact", {})
-                
+
                 # Enrich company data if domain is available
                 # This will fill in missing fields like domain, country, region if LinkedIn didn't provide them
                 if company_data.get("domain"):
@@ -125,7 +127,7 @@ def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
                     for key, value in enriched.items():
                         if value and not company_data.get(key):
                             company_data[key] = value
-                
+
                 # Step 1: Save/upsert company (domain is unique, so upsert will work)
                 if company_data.get("name"):
                     # If domain is missing, try to enrich by company name
@@ -133,14 +135,14 @@ def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
                         logger.warning(f"Missing domain for {company_data.get('name')}, will try enrichment by name")
                         # Note: Current enrich_company only works with domain, but this is a placeholder
                         # for future enhancement where you might enrich by company name
-                    
+
                     # Filter to only include valid schema fields before upserting
                     filtered_company_data = filter_company_data(company_data)
-                    
+
                     # Upsert company by domain (unique constraint) or name if domain is missing
                     # Supabase automatically handles upsert on unique fields
                     company_response = sb.table('companies').upsert(filtered_company_data).execute()
-                    
+
                     # Get the company_id from the response
                     # Upsert returns the inserted/updated record(s)
                     company_id = None
@@ -153,14 +155,14 @@ def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
                             fetch_response = sb.table('companies').select('id').eq('domain', company_data['domain']).limit(1).execute()
                         else:
                             fetch_response = sb.table('companies').select('id').eq('name', company_data['name']).limit(1).execute()
-                        
+
                         if fetch_response.data and len(fetch_response.data) > 0:
                             company_id = fetch_response.data[0].get('id')
                             companies_saved += 1
                         else:
                             logger.warning(f"Could not get company_id for: {company_data.get('name')}")
-                            continue
-                    
+                            return False
+
                     # Step 2: Save contact with company_id reference
                     if company_id:
                         contact_data['company_id'] = company_id
@@ -172,11 +174,15 @@ def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
                             contacts_saved += 1
                 else:
                     logger.warning(f"Skipping record - missing name: {company_data}")
-                    
+
             except Exception as e:
                 logger.error(f"Error saving company/contact record: {e}")
-                continue
-        
+
+            # Returning False means continue processing
+            return False
+
+        results = run_async(scraper.extract_contacts(on_result=handle_result))
+
         result_summary = {
             'companies_saved': companies_saved,
             'contacts_saved': contacts_saved,

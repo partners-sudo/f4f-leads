@@ -956,7 +956,7 @@ class LinkedInScraper(BaseScraper):
         
         return company_data
 
-    async def extract_contacts(self):
+    async def extract_contacts(self, on_result=None):
         async with async_playwright() as p:
             # Use a more realistic browser context to avoid detection
             browser = await p.chromium.launch(
@@ -1254,7 +1254,7 @@ class LinkedInScraper(BaseScraper):
                     }
                     
                     # Store both company and contact data together
-                    results.append({
+                    record = {
                         "company": company_record,
                         "contact": contact_record,
                         # Keep additional metadata for logging
@@ -1263,7 +1263,21 @@ class LinkedInScraper(BaseScraper):
                             "website": detailed_data.get("website"),
                             "linkedin_url": detailed_data.get("linkedin_url")
                         }
-                    })
+                    }
+
+                    results.append(record)
+
+                    # If a callback is provided, allow it to process/save the record immediately.
+                    # If the callback returns True, stop processing further companies.
+                    if on_result is not None:
+                        try:
+                            stop = await on_result(record)
+                        except Exception as e:
+                            logger.error(f"Error in on_result callback: {e}")
+                            stop = False
+                        if stop:
+                            logger.info("Stopping LinkedIn extraction due to on_result callback request.")
+                            break
                     phone_info = f", Phone: {contact_record.get('phone', 'N/A')}" if contact_record.get('phone') else ""
                     logger.info(f"✓ Extracted: {company_record['name']} - Domain: {company_record.get('domain', 'N/A')}, Country: {company_record.get('country', 'N/A')}, Region: {company_record.get('region', 'N/A')}, Type: {company_record.get('type', 'N/A')}{phone_info}")
                     
@@ -1287,11 +1301,23 @@ class LinkedInScraper(BaseScraper):
                         "title": None,
                         "email": None
                     }
-                    results.append({
+                    record = {
                         "company": company_record,
                         "contact": contact_record,
                         "_metadata": {}
-                    })
+                    }
+
+                    results.append(record)
+
+                    if on_result is not None:
+                        try:
+                            stop = await on_result(record)
+                        except Exception as e:
+                            logger.error(f"Error in on_result callback during fallback path: {e}")
+                            stop = False
+                        if stop:
+                            logger.info("Stopping LinkedIn extraction due to on_result callback request (fallback path).")
+                            break
 
             logger.info(f"Extracted {len(results)} companies with detailed information from LinkedIn search for '{self.keyword}'")
             await browser.close()

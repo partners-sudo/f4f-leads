@@ -268,7 +268,6 @@ function ScrapingConsole() {
                   placeholder="Keyword (e.g. retail buyer)"
                   value={linkedinKeyword}
                   onChange={(e) => setLinkedinKeyword(e.target.value)}
-                  disabled={true}
                 />
                 <button
                   className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
