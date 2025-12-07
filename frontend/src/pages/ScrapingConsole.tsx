@@ -5,7 +5,7 @@ import { FINDER_BASE_URL, finderApi } from '@/lib/finder'
 function ScrapingConsole() {
   const [linkedinKeyword, setLinkedinKeyword] = useState('retail buyer')
   const [competitorBrands, setCompetitorBrands] = useState('Funko, Tubbz, Cable guys')
-  const [csvPath, setCsvPath] = useState('D://shop_list.pdf')
+  const [csvPath, setCsvPath] = useState('')
   const [csvSource, setCsvSource] = useState('csv_upload')
 
   const [activeTab, setActiveTab] = useState<'linkedin' | 'competitors' | 'csv'>('linkedin')
@@ -161,6 +161,41 @@ function ScrapingConsole() {
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to run competitor scrape')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleCsvFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      setError(null)
+      setLoading(true)
+
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch(`${FINDER_BASE_URL}/upload/shop-file`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || 'Failed to upload file')
+      }
+
+      const data = (await res.json()) as { file_path?: string; error?: string }
+      if (!data.file_path) {
+        throw new Error(data.error || 'Upload did not return a file path')
+      }
+
+      setCsvPath(data.file_path)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to upload file'
+      setError(message)
     } finally {
       setLoading(false)
     }
@@ -435,19 +470,19 @@ function ScrapingConsole() {
               <div className="space-y-2">
                 <h2 className="font-medium text-sm">CSV/PDF Processing</h2>
                 <input
+                  type="file"
+                  accept=".pdf,.csv,.json"
                   className="w-full border rounded px-2 py-1 text-sm"
-                  placeholder="File path on server"
-                  value={csvPath}
-                  onChange={(e) => setCsvPath(e.target.value)}
-                  disabled={true}
+                  onChange={handleCsvFileChange}
+                  disabled={loading}
                 />
-                <input
-                  className="w-full border rounded px-2 py-1 text-sm"
-                  placeholder="Source tag (e.g. csv_upload)"
-                  value={csvSource}
-                  onChange={(e) => setCsvSource(e.target.value)}
-                  disabled={true}
-                />
+                {csvPath && (
+                  <div className="text-xs text-gray-600 break-all">
+                    Uploaded to server as:
+                    <br />
+                    <code>{csvPath}</code>
+                  </div>
+                )}
                 <button
                   className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
                   onClick={handleStartCsv}

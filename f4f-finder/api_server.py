@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Response, Request
+from fastapi import FastAPI, Response, Request, UploadFile, File
 from starlette.responses import StreamingResponse
 import asyncio
 import json
@@ -7,6 +7,8 @@ from io import StringIO
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
+from pathlib import Path
+import os
 from tasks import (
     scrape_linkedin_companies,
     discover_competitors,
@@ -39,6 +41,10 @@ class CancelRequest(BaseModel):
 
 
 app = FastAPI()
+
+# Directory for uploaded shop list files (CSV/PDF/JSON)
+UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 RUN_TASKS: dict[str, asyncio.Task] = {}
 
@@ -77,6 +83,44 @@ def scrape_linkedin(payload: LinkedinScrapeRequest):
         logger.removeHandler(handler)
     logs_value = log_stream.getvalue()
     return ScrapeResponse(status="SUCCESS", result=result, logs=logs_value or None)
+
+
+@app.post("/upload/shop-file")
+async def upload_shop_file(file: UploadFile = File(...)):
+    """Upload a CSV/PDF/JSON shop list from the client and store it on the server.
+
+    Returns the server-side file path, which can then be passed to /scrape/csv/stream.
+    """
+    # Restrict allowed file types
+    original_name = file.filename or "uploaded_file"
+    suffix = Path(original_name).suffix.lower()
+    allowed_suffixes = {".pdf", ".csv", ".json"}
+    if suffix not in allowed_suffixes:
+        return Response(
+            status_code=400,
+            content=json.dumps({"error": f"Unsupported file type: {suffix}. Allowed: .pdf, .csv, .json"}),
+            media_type="application/json",
+        )
+
+    # Ensure unique filename to avoid collisions
+    safe_name = f"{uuid.uuid4().hex}{suffix}"
+    dest_path = UPLOAD_DIR / safe_name
+
+    try:
+        with dest_path.open("wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception as e:
+        return Response(
+            status_code=500,
+            content=json.dumps({"error": f"Failed to save uploaded file: {e}"}),
+            media_type="application/json",
+        )
+
+    return {"file_path": str(dest_path)}
 
 
 @app.get("/scrape/competitors/stream")

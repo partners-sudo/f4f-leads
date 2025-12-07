@@ -463,8 +463,21 @@ def process_shop_file(file_path: str, use_cache: bool = True) -> List[Dict[str, 
         shops = read_csv_file(str(file_path_obj))
     elif file_ext == '.pdf':
         shops = parse_pdf_to_csv_data(str(file_path_obj))
+    elif file_ext == '.json':
+        # Treat JSON input as a pre-extracted list of shops
+        # Expect a list of objects with at least name/address fields (same as cache format)
+        try:
+            with open(file_path_obj, 'r', encoding='utf-8') as f:
+                loaded = json.load(f)
+            if not isinstance(loaded, list):
+                raise ValueError("JSON shop list must be a list of objects")
+            shops = loaded
+            logger.info(f"Loaded {len(shops)} shops from JSON: {file_path}")
+        except Exception as e:
+            logger.error(f"Failed to load shops from JSON file {file_path}: {e}")
+            raise
     else:
-        raise ValueError(f"Unsupported file type: {file_ext}. Supported: .csv, .pdf")
+        raise ValueError(f"Unsupported file type: {file_ext}. Supported: .csv, .pdf, .json")
     
     # Normalize all shops
     normalized_shops = []
