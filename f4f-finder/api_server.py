@@ -14,6 +14,8 @@ from tasks import (
     discover_competitors,
     process_shop_csv,
     request_cancel,
+    request_pause,
+    request_resume,
 )
 
 
@@ -225,7 +227,6 @@ async def stream_linkedin(keyword: str, request: Request):
             logger.removeHandler(handler)
             await queue.put(None)
 
-    run_id = uuid.uuid4().hex
     task = asyncio.create_task(run_task())
     RUN_TASKS[run_id] = task
 
@@ -341,7 +342,6 @@ async def stream_csv(request: Request, file_path: str, source: str | None = None
             logger.removeHandler(handler)
             await queue.put(None)
 
-    run_id = uuid.uuid4().hex
     task = asyncio.create_task(run_task())
     RUN_TASKS[run_id] = task
 
@@ -395,3 +395,39 @@ async def cancel_csv(payload: CancelRequest):
     if task is not None:
         task.cancel()
     return {"status": "CANCEL_REQUESTED"}
+
+
+@app.post("/scrape/linkedin/pause")
+async def pause_linkedin(payload: CancelRequest):
+    request_pause(payload.run_id)
+    return {"status": "PAUSE_REQUESTED"}
+
+
+@app.post("/scrape/linkedin/resume")
+async def resume_linkedin(payload: CancelRequest):
+    request_resume(payload.run_id)
+    return {"status": "RESUME_REQUESTED"}
+
+
+@app.post("/scrape/competitors/pause")
+async def pause_competitors(payload: CancelRequest):
+    request_pause(payload.run_id)
+    return {"status": "PAUSE_REQUESTED"}
+
+
+@app.post("/scrape/competitors/resume")
+async def resume_competitors(payload: CancelRequest):
+    request_resume(payload.run_id)
+    return {"status": "RESUME_REQUESTED"}
+
+
+@app.post("/scrape/csv/pause")
+async def pause_csv(payload: CancelRequest):
+    request_pause(payload.run_id)
+    return {"status": "PAUSE_REQUESTED"}
+
+
+@app.post("/scrape/csv/resume")
+async def resume_csv(payload: CancelRequest):
+    request_resume(payload.run_id)
+    return {"status": "RESUME_REQUESTED"}

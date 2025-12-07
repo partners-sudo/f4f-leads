@@ -1,4 +1,5 @@
 import asyncio
+import time
 from celery_app import app
 
 from supabase_client import sb
@@ -23,6 +24,10 @@ from utils.logger import logger
 # an API endpoint can signal a running scrape to exit early.
 CANCEL_FLAGS: dict[str, bool] = {}
 
+# Cooperative pause flags keyed by run_id. When set to True, long-running
+# scrapes should temporarily stop doing work until the flag is cleared.
+PAUSE_FLAGS: dict[str, bool] = {}
+
 
 def request_cancel(run_id: str) -> None:
     """Mark a given run_id as cancelled.
@@ -35,10 +40,34 @@ def request_cancel(run_id: str) -> None:
         CANCEL_FLAGS[run_id] = True
 
 
+def request_pause(run_id: str) -> None:
+    """Mark a given run_id as paused.
+
+    Scrapers should periodically call is_paused(run_id) and temporarily
+    yield/sleep while it returns True.
+    """
+
+    if run_id:
+        PAUSE_FLAGS[run_id] = True
+
+
+def request_resume(run_id: str) -> None:
+    """Clear the pause flag for a run so it can continue processing."""
+
+    if run_id:
+        PAUSE_FLAGS.pop(run_id, None)
+
+
 def is_cancelled(run_id: str | None) -> bool:
     """Check if the given run_id has been cancelled."""
 
     return bool(run_id) and CANCEL_FLAGS.get(run_id, False)
+
+
+def is_paused(run_id: str | None) -> bool:
+    """Check if the given run_id is currently paused."""
+
+    return bool(run_id) and PAUSE_FLAGS.get(run_id, False)
 
 
 def clear_cancel(run_id: str | None) -> None:
@@ -46,6 +75,7 @@ def clear_cancel(run_id: str | None) -> None:
 
     if run_id:
         CANCEL_FLAGS.pop(run_id, None)
+        PAUSE_FLAGS.pop(run_id, None)
 
 # Valid fields for companies table (excluding auto-generated fields like id, created_at, updated_at)
 VALID_COMPANY_FIELDS = {
@@ -113,6 +143,12 @@ def scrape_linkedin_companies(self, keyword, run_id: str | None = None):
                 logger.info("LinkedIn scrape cancelled by user, stopping early via callback.")
                 # Returning True signals the scraper to stop processing further companies
                 return True
+
+            # Cooperative pause: if a pause has been requested for this run,
+            # sleep in short intervals until it is resumed or cancelled.
+            while is_paused(run_id) and not is_cancelled(run_id):
+                logger.info("LinkedIn scrape paused by user, waiting to resume...")
+                time.sleep(1.0)
 
             try:
                 # Extract company and contact data
@@ -328,6 +364,11 @@ def _process_shop_csv_impl(
             if is_cancelled(run_id):
                 logger.info("CSV/PDF processing cancelled by user, stopping early.")
                 break
+
+            # Cooperative pause: allow user to temporarily halt processing
+            while is_paused(run_id) and not is_cancelled(run_id):
+                logger.info("CSV/PDF processing paused by user, waiting to resume...")
+                time.sleep(1.0)
             try:
                 shop_name = shop.get('name')
                 shop_address = shop.get('address')
@@ -553,9 +594,14 @@ def discover_competitors(self, brand_names: list, run_id: str | None = None):
     try:
         # Lazy import to avoid circular dependency
         from discovery.competitor_discovery import CompetitorDiscovery
-        
-        discovery = CompetitorDiscovery(brand_names)
-        
+
+        discovery = CompetitorDiscovery(brand_names, run_id=run_id)
+
+        # Cooperative pause before starting discovery
+        while is_paused(run_id) and not is_cancelled(run_id):
+            logger.info("Competitor discovery paused by user before discovery phase...")
+            time.sleep(1.0)
+
         # Run discovery (async)
         discovery_stats = run_async(discovery.discover_all())
 
@@ -568,6 +614,11 @@ def discover_competitors(self, brand_names: list, run_id: str | None = None):
                 'report': 'Cancelled before save_to_supabase',
                 'cancelled': True,
             }
+
+        # Cooperative pause between discovery and save phases
+        while is_paused(run_id) and not is_cancelled(run_id):
+            logger.info("Competitor discovery paused by user before save_to_supabase phase...")
+            time.sleep(1.0)
 
         # Save to Supabase (async)
         save_stats = run_async(discovery.save_to_supabase())

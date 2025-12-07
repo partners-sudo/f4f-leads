@@ -31,13 +31,13 @@ parent_dir = Path(__file__).parent.parent
 if str(parent_dir) not in sys.path:
     sys.path.insert(0, str(parent_dir))
 
-from tasks import filter_company_data, filter_contact_data
+from tasks import filter_company_data, filter_contact_data, is_cancelled, is_paused
 
 
 class CompetitorDiscovery:
     """Main class for discovering retailers that sell competitor brands."""
     
-    def __init__(self, brand_names: List[str]):
+    def __init__(self, brand_names: List[str], run_id: Optional[str] | None = None):
         """
         Initialize competitor discovery.
         
@@ -50,6 +50,31 @@ class CompetitorDiscovery:
         self.seen_names: Set[str] = set()
         # Track which brands each company matches
         self.company_brand_matches: Dict[str, Set[str]] = {}  # domain -> set of brands
+        # Optional run identifier used for cooperative pause/cancel
+        self.run_id: Optional[str] = run_id
+
+    async def _check_control(self) -> bool:
+        """Check for pause/cancel requests and honor them cooperatively.
+
+        Returns True if the caller should stop work early (cancelled).
+        """
+
+        if not self.run_id:
+            return False
+
+        if is_cancelled(self.run_id):
+            logger.info("Competitor discovery cancelled by user, stopping early.")
+            return True
+
+        while is_paused(self.run_id) and not is_cancelled(self.run_id):
+            logger.info("Competitor discovery paused by user, waiting to resume...")
+            await asyncio.sleep(1.0)
+
+        if is_cancelled(self.run_id):
+            logger.info("Competitor discovery cancelled by user after pause, stopping early.")
+            return True
+
+        return False
         
     async def discover_all(self) -> Dict:
         """
@@ -64,21 +89,58 @@ class CompetitorDiscovery:
         
         # Strategy 1: Brand website retailer lists
         logger.info("📋 Strategy 1: Brand Website Retailer Lists")
+        if await self._check_control():
+            return {'total_discovered': 0, 'by_strategy': {}, 'after_deduplication': 0}
         brand_results = await self._discover_from_brand_sites()
         logger.info(f"   Found {len(brand_results)} companies from brand sites\n")
         
         # Strategy 2: Marketplace sellers
         logger.info("🛒 Strategy 2: Marketplace Sellers")
+        if await self._check_control():
+            return {
+                'total_discovered': len(brand_results),
+                'by_strategy': {
+                    'brand_sites': len(brand_results),
+                    'marketplaces': 0,
+                    'conventions': 0,
+                    'overlap': 0,
+                },
+                'after_deduplication': len(brand_results),
+            }
         marketplace_results = await self._discover_from_marketplaces()
         logger.info(f"   Found {len(marketplace_results)} companies from marketplaces\n")
         
         # Strategy 3: Convention vendor lists
         logger.info("🎪 Strategy 3: Convention Vendor Lists")
+        if await self._check_control():
+            all_partial = brand_results + marketplace_results
+            return {
+                'total_discovered': len(all_partial),
+                'by_strategy': {
+                    'brand_sites': len(brand_results),
+                    'marketplaces': len(marketplace_results),
+                    'conventions': 0,
+                    'overlap': 0,
+                },
+                'after_deduplication': len(all_partial),
+            }
         convention_results = await self._discover_from_conventions()
         logger.info(f"   Found {len(convention_results)} companies from conventions\n")
         
         # Strategy 4: Overlap search (stores selling similar products)
         logger.info("🔍 Strategy 4: Overlap Search (Similar Products)")
+        if await self._check_control():
+            all_partial = brand_results + marketplace_results + convention_results
+            return {
+                'total_discovered': len(all_partial),
+                'by_strategy': {
+                    'brand_sites': len(brand_results),
+                    'marketplaces': len(marketplace_results),
+                    'conventions': len(convention_results),
+                    'overlap': 0,
+                },
+                'after_deduplication': len(all_partial),
+            }
         overlap_results = await self._discover_from_overlap_search()
         logger.info(f"   Found {len(overlap_results)} companies from overlap search\n")
         
@@ -113,6 +175,9 @@ class CompetitorDiscovery:
         results = []
         
         for brand in self.brand_names:
+            # Allow user to pause/cancel between brands
+            if await self._check_control():
+                break
             try:
                 # Search for brand websites - try multiple potential domains
                 brand_domains = await self._find_brand_websites(brand)
@@ -122,6 +187,8 @@ class CompetitorDiscovery:
                 
                 # Try all found brand domains (in case there are regional variations)
                 for brand_domain in brand_domains:
+                    if await self._check_control():
+                        break
                     logger.info(f"   Checking brand domain: {brand_domain}")
                     
                     # Common retailer list page patterns (from strategy doc)
@@ -142,6 +209,8 @@ class CompetitorDiscovery:
                     # Different pages may have different retailers
                     total_found = 0
                     for page_url in retailer_pages:
+                        if await self._check_control():
+                            break
                         try:
                             page_results = await self._scrape_retailer_list_page(page_url, brand)
                             if page_results:

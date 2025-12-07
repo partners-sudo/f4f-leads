@@ -16,6 +16,9 @@ function ScrapingConsole() {
   const [linkedinRunId, setLinkedinRunId] = useState<string | null>(null)
   const [competitorRunId, setCompetitorRunId] = useState<string | null>(null)
   const [csvRunId, setCsvRunId] = useState<string | null>(null)
+  const [linkedinPaused, setLinkedinPaused] = useState(false)
+  const [competitorPaused, setCompetitorPaused] = useState(false)
+  const [csvPaused, setCsvPaused] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -65,6 +68,7 @@ function ScrapingConsole() {
       setLinkedinResult(null)
       setLinkedinLogs('')
       setLinkedinRunId(null)
+      setLinkedinPaused(false)
       linkedinSourceRef.current?.close()
 
       const url = `${FINDER_BASE_URL}/scrape/linkedin/stream?keyword=${encodeURIComponent(
@@ -121,6 +125,7 @@ function ScrapingConsole() {
       setCompetitorResult(null)
       setCompetitorLogs('')
       setCompetitorRunId(null)
+      setCompetitorPaused(false)
       competitorSourceRef.current?.close()
 
       const url = `${FINDER_BASE_URL}/scrape/competitors/stream?brands=${encodeURIComponent(
@@ -209,6 +214,7 @@ function ScrapingConsole() {
       setCsvResult(null)
       setCsvLogs('')
       setCsvRunId(null)
+      setCsvPaused(false)
       csvSourceRef.current?.close()
 
       const params = new URLSearchParams({
@@ -311,6 +317,27 @@ function ScrapingConsole() {
                 >
                   Run LinkedIn Scrape
                 </button>
+                {linkedinSourceRef.current && linkedinRunId && (
+                  <button
+                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const endpoint = linkedinPaused ? 'resume' : 'pause'
+                        await fetch(`${FINDER_BASE_URL}/scrape/linkedin/${endpoint}`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ run_id: linkedinRunId }),
+                        })
+                        setLinkedinPaused(!linkedinPaused)
+                      } catch {
+                        // ignore pause/resume errors in UI
+                      }
+                    }}
+                  >
+                    {linkedinPaused ? 'Continue' : 'Stop'}
+                  </button>
+                )}
                 {linkedinSourceRef.current && (
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
@@ -329,6 +356,7 @@ function ScrapingConsole() {
                       } finally {
                         linkedinSourceRef.current?.close()
                         linkedinSourceRef.current = null
+                        setLinkedinPaused(false)
                         setLoading(false)
                       }
                     }}
@@ -388,7 +416,6 @@ function ScrapingConsole() {
                   placeholder="Brands (comma separated)"
                   value={competitorBrands}
                   onChange={(e) => setCompetitorBrands(e.target.value)}
-                  disabled={true}
                 />
                 <button
                   className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
@@ -397,6 +424,27 @@ function ScrapingConsole() {
                 >
                   Run Competitor Scrape
                 </button>
+                {competitorSourceRef.current && competitorRunId && (
+                  <button
+                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const endpoint = competitorPaused ? 'resume' : 'pause'
+                        await fetch(`${FINDER_BASE_URL}/scrape/competitors/${endpoint}`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ run_id: competitorRunId }),
+                        })
+                        setCompetitorPaused(!competitorPaused)
+                      } catch {
+                        // ignore pause/resume errors in UI
+                      }
+                    }}
+                  >
+                    {competitorPaused ? 'Continue' : 'Stop'}
+                  </button>
+                )}
                 {competitorSourceRef.current && (
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
@@ -415,6 +463,7 @@ function ScrapingConsole() {
                       } finally {
                         competitorSourceRef.current?.close()
                         competitorSourceRef.current = null
+                        setCompetitorPaused(false)
                         setLoading(false)
                       }
                     }}
@@ -490,6 +539,27 @@ function ScrapingConsole() {
                 >
                   Run CSV Scrape
                 </button>
+                {csvSourceRef.current && csvRunId && (
+                  <button
+                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const endpoint = csvPaused ? 'resume' : 'pause'
+                        await fetch(`${FINDER_BASE_URL}/scrape/csv/${endpoint}`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ run_id: csvRunId }),
+                        })
+                        setCsvPaused(!csvPaused)
+                      } catch {
+                        // ignore pause/resume errors in UI
+                      }
+                    }}
+                  >
+                    {csvPaused ? 'Continue' : 'Stop'}
+                  </button>
+                )}
                 {csvSourceRef.current && (
                   <button
                     className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
@@ -508,6 +578,7 @@ function ScrapingConsole() {
                       } finally {
                         csvSourceRef.current?.close()
                         csvSourceRef.current = null
+                        setCsvPaused(false)
                         setLoading(false)
                       }
                     }}
