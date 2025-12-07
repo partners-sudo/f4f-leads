@@ -21,7 +21,12 @@ def process_shop_file_sync(file_path: str, source: str = "csv_upload", use_cache
         source: Source identifier for the companies (default: "csv_upload")
         use_cache: Whether to use cache if available (default: True)
     """
-    from processors.csv_processor import process_shop_file
+    from processors.csv_processor import (
+        process_shop_file,
+        get_cache_file_path,
+        save_shops_to_cache,
+        load_shops_from_cache,
+    )
     from enrichment.domain_finder import find_domain
     from enrichment.email_finder import find_emails
     from enrichment.clearbit_integration import enrich_company
@@ -146,7 +151,23 @@ def process_shop_file_sync(file_path: str, source: str = "csv_upload", use_cache
                     logger.info(f"  ✓ Saved contact: {email} (score: {score:.2f})")
             else:
                 logger.warning(f"No domain found for {shop_name}, skipping email search")
-            
+
+            # After successful processing, update cache JSON to remove this shop row
+            try:
+                cache_path = get_cache_file_path(file_path)
+                current_cached = load_shops_from_cache(cache_path) or shops
+                remaining_shops = [
+                    s for s in current_cached
+                    if not (
+                        s.get('name') == shop_name and
+                        s.get('address') == shop_address
+                    )
+                ]
+                save_shops_to_cache(remaining_shops, cache_path)
+                logger.info(f"   💾 Updated cache with {len(remaining_shops)} remaining shops after removing '{shop_name}'")
+            except Exception as cache_err:
+                logger.warning(f"Failed to update shop cache after processing {shop_name}: {cache_err}")
+
             logger.info(f"✅ Completed shop {idx}/{len(shops)}: {shop_name}")
             
         except Exception as e:
@@ -154,6 +175,29 @@ def process_shop_file_sync(file_path: str, source: str = "csv_upload", use_cache
             import traceback
             logger.error(traceback.format_exc())
             errors += 1
+
+            # Even on error (e.g., duplicate domain in Supabase), remove this shop
+            # from the cache so we don't keep retrying the same failing row.
+            try:
+                cache_path = get_cache_file_path(file_path)
+                shop_name = shop.get('name')
+                shop_address = shop.get('address')
+                if shop_name:
+                    current_cached = load_shops_from_cache(cache_path) or shops
+                    remaining_shops = [
+                        s for s in current_cached
+                        if not (
+                            s.get('name') == shop_name and
+                            s.get('address') == shop_address
+                        )
+                    ]
+                    save_shops_to_cache(remaining_shops, cache_path)
+                    logger.info(
+                        f"   💾 (error path) Updated cache with {len(remaining_shops)} remaining shops after removing '{shop_name}'"
+                    )
+            except Exception as cache_err:
+                logger.warning(f"Failed to update shop cache after error on {shop.get('name', 'unknown')}: {cache_err}")
+
             continue
     
     result = {

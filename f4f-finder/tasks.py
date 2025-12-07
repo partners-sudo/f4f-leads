@@ -304,7 +304,12 @@ def _process_shop_csv_impl(
         Dictionary with processing statistics
     """
     try:
-        from processors.csv_processor import process_shop_file
+        from processors.csv_processor import (
+            process_shop_file,
+            get_cache_file_path,
+            save_shops_to_cache,
+            load_shops_from_cache,
+        )
         
         logger.info(f"\n{'='*60}")
         logger.info(f"🚀 Starting CSV/PDF processing: {file_path}")
@@ -439,12 +444,54 @@ def _process_shop_csv_impl(
                         logger.info(f"  ✓ Saved contact: {email} (score: {score:.2f})")
                 else:
                     logger.warning(f"No domain found for {shop_name}, skipping email search")
-                
+
+                # Step 2d: Update cache JSON to remove this processed shop row
+                if use_cache:
+                    try:
+                        cache_path = get_cache_file_path(file_path)
+                        current_cached = load_shops_from_cache(cache_path) or shops
+                        # Remove entries that match this shop's name and address
+                        remaining_shops = [
+                            s for s in current_cached
+                            if not (
+                                s.get('name') == shop_name and
+                                s.get('address') == shop_address
+                            )
+                        ]
+                        save_shops_to_cache(remaining_shops, cache_path)
+                        logger.info(f"   💾 Updated cache with {len(remaining_shops)} remaining shops after removing '{shop_name}'")
+                    except Exception as cache_err:
+                        logger.warning(f"Failed to update shop cache after processing {shop_name}: {cache_err}")
+
                 logger.info(f"✅ Completed shop {idx}/{len(shops)}: {shop_name}")
                 
             except Exception as e:
                 logger.error(f"Error processing shop {idx} ({shop.get('name', 'unknown')}): {e}")
                 errors += 1
+
+                # Even on error (e.g., duplicate domain in Supabase), remove this shop
+                # from the cache so we don't keep retrying the same failing row.
+                if use_cache:
+                    try:
+                        shop_name = shop.get('name')
+                        shop_address = shop.get('address')
+                        if shop_name:
+                            cache_path = get_cache_file_path(file_path)
+                            current_cached = load_shops_from_cache(cache_path) or shops
+                            remaining_shops = [
+                                s for s in current_cached
+                                if not (
+                                    s.get('name') == shop_name and
+                                    s.get('address') == shop_address
+                                )
+                            ]
+                            save_shops_to_cache(remaining_shops, cache_path)
+                            logger.info(
+                                f"   💾 (error path) Updated cache with {len(remaining_shops)} remaining shops after removing '{shop_name}'"
+                            )
+                    except Exception as cache_err:
+                        logger.warning(f"Failed to update shop cache after error on {shop.get('name', 'unknown')}: {cache_err}")
+
                 continue
         
         result = {
