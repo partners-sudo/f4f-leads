@@ -263,35 +263,42 @@ function ScrapingConsole() {
   }
 
   return (
-    <div className="p-6 space-y-8">
-      <h1 className="text-2xl font-semibold mb-4">Scraping Console</h1>
-      <div className="border rounded-lg bg-card">
-        <div className="flex border-b">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-50 pb-6">
+          Scraping Console
+        </h1>
+        <p className="text-sm text-slate-400 max-w-xl">
+          Orchestrate LinkedIn discovery, competitor analysis, and CSV/PDF processing from a single live console.
+        </p>
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-slate-900/70 shadow-[0_18px_40px_rgba(15,23,42,0.9)] backdrop-blur-2xl overflow-hidden">
+        <div className="flex border-b border-white/10 bg-slate-900/80">
           <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`relative px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] border-b-2 transition-colors ${
               activeTab === 'linkedin'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+                ? 'border-emerald-400 text-emerald-300'
+                : 'border-transparent text-slate-500 hover:text-slate-200'
             }`}
             onClick={() => setActiveTab('linkedin')}
           >
             LinkedIn Scraping
           </button>
           <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`relative px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] border-b-2 transition-colors ${
               activeTab === 'competitors'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+                ? 'border-emerald-400 text-emerald-300'
+                : 'border-transparent text-slate-500 hover:text-slate-200'
             }`}
             onClick={() => setActiveTab('competitors')}
           >
             Competitor Discovery
           </button>
           <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`relative px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] border-b-2 transition-colors ${
               activeTab === 'csv'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+                ? 'border-emerald-400 text-emerald-300'
+                : 'border-transparent text-slate-500 hover:text-slate-200'
             }`}
             onClick={() => setActiveTab('csv')}
           >
@@ -299,19 +306,19 @@ function ScrapingConsole() {
           </button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-5 space-y-6">
           {activeTab === 'linkedin' && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <h2 className="font-medium text-sm">LinkedIn Scraping</h2>
+                <h2 className="font-medium text-sm text-slate-100">LinkedIn Scraping</h2>
                 <input
-                  className="w-full border rounded px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-slate-700/70 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/80 focus-visible:border-emerald-400/80"
                   placeholder="Keyword (e.g. retail buyer)"
                   value={linkedinKeyword}
                   onChange={(e) => setLinkedinKeyword(e.target.value)}
                 />
                 <button
-                  className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
+                  className="inline-flex items-center rounded-md bg-gradient-to-r from-emerald-400 via-sky-400 to-indigo-400 px-3 py-1.5 text-xs font-medium text-slate-950 shadow-[0_12px_30px_rgba(15,23,42,0.9)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={handleStartLinkedin}
                   disabled={!linkedinKeyword.trim() || loading}
                 >
@@ -319,7 +326,7 @@ function ScrapingConsole() {
                 </button>
                 {linkedinSourceRef.current && linkedinRunId && (
                   <button
-                    className="ml-2 px-3 py-1 text-xs rounded border text-muted-foreground hover:bg-accent"
+                    className="ml-2 inline-flex items-center rounded-md border border-slate-700/70 bg-slate-900/70 px-3 py-1 text-[0.7rem] font-medium text-slate-300 hover:border-emerald-400/50 hover:bg-slate-900/90"
                     type="button"
                     onClick={async () => {
                       try {
@@ -380,27 +387,27 @@ function ScrapingConsole() {
 
               <div className="grid gap-4 md:grid-cols-1">
                 <div className="space-y-2">
-                  <h3 className="font-medium text-sm">Run Log</h3>
+                  <h3 className="font-medium text-sm text-slate-100">Run Log</h3>
                   {linkedinLogs ? (
                     <pre
                       ref={linkedinLogRef}
-                      className="mt-1 max-h-72 overflow-auto bg-black text-green-200 border rounded p-2 text-xs leading-snug font-mono"
+                      className="mt-1 max-h-72 overflow-auto rounded-lg border border-slate-800/80 bg-black/90 p-3 text-[0.7rem] leading-snug font-mono text-emerald-300 shadow-inner"
                     >
                       {linkedinLogs}
                     </pre>
                   ) : (
-                    <div className="text-sm text-gray-500">Logs will appear here after a run.</div>
+                    <div className="text-xs text-slate-500">Logs will appear here after a run.</div>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <h3 className="font-medium text-sm">Result</h3>
+                  <h3 className="font-medium text-sm text-slate-100">Result</h3>
                   {linkedinResult ? (
-                    <pre className="mt-1 max-h-72 overflow-auto bg-gray-50 border rounded p-2 text-xs">
+                    <pre className="mt-1 max-h-72 overflow-auto rounded-lg border border-slate-800/80 bg-slate-950/80 p-3 text-[0.7rem] text-slate-100">
                       {JSON.stringify(linkedinResult.result, null, 2)}
                     </pre>
                   ) : (
-                    <div className="text-sm text-gray-500">No LinkedIn scrape run yet.</div>
+                    <div className="text-xs text-slate-500">No LinkedIn scrape run yet.</div>
                   )}
                 </div>
               </div>
@@ -410,9 +417,9 @@ function ScrapingConsole() {
           {activeTab === 'competitors' && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <h2 className="font-medium text-sm">Competitor Discovery</h2>
+                <h2 className="font-medium text-sm text-slate-100">Competitor Discovery</h2>
                 <input
-                  className="w-full border rounded px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-slate-700/70 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/80 focus-visible:border-emerald-400/80"
                   placeholder="Brands (comma separated)"
                   value={competitorBrands}
                   onChange={(e) => setCompetitorBrands(e.target.value)}
@@ -491,7 +498,7 @@ function ScrapingConsole() {
                   {competitorLogs ? (
                     <pre
                       ref={competitorLogRef}
-                      className="mt-1 max-h-72 overflow-auto bg-black text-green-200 border rounded p-2 text-xs leading-snug font-mono"
+                      className="mt-1 max-h-72 overflow-auto rounded-lg border border-slate-800/80 bg-black/90 p-3 text-[0.7rem] leading-snug font-mono text-emerald-300 shadow-inner"
                     >
                       {competitorLogs}
                     </pre>
@@ -507,7 +514,7 @@ function ScrapingConsole() {
                       {JSON.stringify(competitorResult.result, null, 2)}
                     </pre>
                   ) : (
-                    <div className="text-sm text-gray-500">No competitor scrape run yet.</div>
+                    <div className="text-xs text-slate-500">No competitor scrape run yet.</div>
                   )}
                 </div>
               </div>
@@ -517,16 +524,16 @@ function ScrapingConsole() {
           {activeTab === 'csv' && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <h2 className="font-medium text-sm">CSV/PDF Processing</h2>
+                <h2 className="font-medium text-sm text-slate-100">CSV/PDF Processing</h2>
                 <input
                   type="file"
                   accept=".pdf,.csv,.json"
-                  className="w-full border rounded px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-slate-700/70 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 file:mr-3 file:rounded-md file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-xs file:font-medium file:text-slate-100 hover:file:bg-slate-700/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/80 focus-visible:border-emerald-400/80"
                   onChange={handleCsvFileChange}
                   disabled={loading}
                 />
                 {csvPath && (
-                  <div className="text-xs text-gray-600 break-all">
+                  <div className="text-[0.7rem] text-slate-400 break-all">
                     Uploaded to server as:
                     <br />
                     <code>{csvPath}</code>
@@ -606,7 +613,7 @@ function ScrapingConsole() {
                   {csvLogs ? (
                     <pre
                       ref={csvLogRef}
-                      className="mt-1 max-h-72 overflow-auto bg-black text-green-200 border rounded p-2 text-xs leading-snug font-mono"
+                      className="mt-1 max-h-72 overflow-auto rounded-lg border border-slate-800/80 bg-black/90 p-3 text-[0.7rem] leading-snug font-mono text-emerald-300 shadow-inner"
                     >
                       {csvLogs}
                     </pre>
@@ -622,7 +629,7 @@ function ScrapingConsole() {
                       {JSON.stringify(csvResult.result, null, 2)}
                     </pre>
                   ) : (
-                    <div className="text-sm text-gray-500">No CSV scrape run yet.</div>
+                    <div className="text-xs text-slate-500">No CSV scrape run yet.</div>
                   )}
                 </div>
               </div>
@@ -632,7 +639,9 @@ function ScrapingConsole() {
       </div>
 
       {error && (
-        <div className="border rounded-lg p-3 text-sm text-red-600 bg-red-50">{error}</div>
+        <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-100 shadow-[0_10px_30px_rgba(127,29,29,0.5)]">
+          {error}
+        </div>
       )}
 
     </div>

@@ -20,13 +20,21 @@ export default function Reviews() {
   })
 
   const { data: reviews, isLoading } = useInteractionReviews(filters)
+  const [page, setPage] = useState(1)
+  const pageSize = 8
+
+  const totalItems = reviews?.length ?? 0
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
+  const start = (page - 1) * pageSize
+  const end = start + pageSize
+  const paginatedReviews = reviews?.slice(start, end) ?? []
 
   const pendingReviews = reviews?.filter((r) => r.outcome === 'pending') || []
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Interaction Reviews</h1>
+        <h1 className="text-3xl font-bold pb-6">Interaction Reviews</h1>
         <p className="text-muted-foreground">
           Review and respond to contact replies
         </p>
@@ -73,8 +81,10 @@ export default function Reviews() {
       {/* Table */}
       {isLoading ? (
         <div>Loading...</div>
+      ) : !reviews || reviews.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">No interaction reviews found</div>
       ) : (
-        <div className="border rounded-lg">
+        <div className="border rounded-lg bg-card/60">
           <Table>
             <TableHeader>
               <TableRow>
@@ -88,7 +98,7 @@ export default function Reviews() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {reviews?.map((review) => (
+              {paginatedReviews.map((review) => (
                 <TableRow key={review.id}>
                   <TableCell>
                     {review.outreach_logs?.contacts?.name || '-'}
@@ -129,6 +139,35 @@ export default function Reviews() {
               ))}
             </TableBody>
           </Table>
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+            <span>
+              Showing <span className="font-medium">{start + 1}</span>–
+              <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}
+              <span className="font-medium">{totalItems}</span>
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="inline-flex items-center rounded-md border px-2 py-1 text-[0.7rem] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent"
+              >
+                Prev
+              </button>
+              <span>
+                Page <span className="font-semibold">{page}</span> of{' '}
+                <span className="font-semibold">{totalPages}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="inline-flex items-center rounded-md border px-2 py-1 text-[0.7rem] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

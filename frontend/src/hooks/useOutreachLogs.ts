@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase, type OutreachLog } from '@/lib/supabase'
 
 export function useOutreachLogs(filters?: {
-  stage?: number
+  stage?: string | number
   brand?: string
   status?: string
   dateFrom?: string

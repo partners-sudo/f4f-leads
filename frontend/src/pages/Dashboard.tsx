@@ -65,26 +65,36 @@ export default function Dashboard() {
   ]
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your CRM activity</p>
+    <div className="space-y-8">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-50">
+          Overview
+        </h1>
+        <p className="text-sm text-slate-400">
+          High-level stats across companies, contacts, outreach, and reviews.
+        </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => {
           const Icon = card.icon
           return (
-            <Card key={card.title}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
+            <Card
+              key={card.title}
+              className="relative overflow-hidden border-white/10 bg-slate-900/70 text-slate-100 shadow-[0_16px_40px_rgba(15,23,42,0.9)] transition-transform duration-200 ease-out hover:-translate-y-[2px]"
+            >
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-400/5 via-sky-400/0 to-indigo-500/10" />
+              <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
                   {card.title}
                 </CardTitle>
-                <Icon className="h-4 w-4 text-muted-foreground" />
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-slate-900/70 text-emerald-200">
+                  <Icon className="h-4 w-4" />
+                </span>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{card.value}</div>
-                <p className="text-xs text-muted-foreground">
+              <CardContent className="relative space-y-1">
+                <div className="text-2xl font-semibold tracking-tight">{card.value}</div>
+                <p className="text-[0.7rem] text-slate-400">
                   {card.description}
                 </p>
               </CardContent>
@@ -94,12 +104,20 @@ export default function Dashboard() {
       </div>
 
       {stats.lastSyncAt && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Last ERP Sync</CardTitle>
-            <CardDescription>
-              {new Date(stats.lastSyncAt).toLocaleString()}
-            </CardDescription>
+        <Card className="mt-2 border-white/10 bg-slate-900/70 text-slate-100">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-sm font-medium tracking-tight">
+                Last ERP Sync
+              </CardTitle>
+              <CardDescription className="text-xs text-slate-400">
+                {new Date(stats.lastSyncAt).toLocaleString()}
+              </CardDescription>
+            </div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[0.7rem] font-medium text-emerald-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              ERP / Retool
+            </span>
           </CardHeader>
         </Card>
       )}
