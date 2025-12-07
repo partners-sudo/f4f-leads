@@ -162,7 +162,7 @@ export default function CompanyDetail() {
                       </TableCell>
                       <TableCell>
                         <Link to={`/contacts/${contact.id}`}>
-                          <button className="text-primary hover:underline">View</button>
+                          <button className="text-primary hover:underline text-white">View</button>
                         </Link>
                       </TableCell>
                     </TableRow>

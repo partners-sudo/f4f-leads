@@ -358,7 +358,7 @@ export default function ReviewDetail() {
             </div>
           ) : (
             <div>
-              <p>No suggestions available. Click to generate:</p>
+              <p className='pb-6'>No suggestions available. Click to generate:</p>
               <Button
                 onClick={() => {
                   if (outreachLog && outreachLog.message_snippet) {
@@ -369,6 +369,7 @@ export default function ReviewDetail() {
                     })
                   }
                 }}
+                className='bg-emerald-500/20 hover:bg-emerald-500/40'
               >
                 Generate Suggestions
               </Button>
