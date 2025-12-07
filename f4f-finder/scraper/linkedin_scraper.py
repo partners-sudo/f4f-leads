@@ -351,11 +351,12 @@ class LinkedInScraper(BaseScraper):
             return None
         
         # First, try to find phone number patterns directly (most reliable)
-        # Look for patterns starting with +, 00, or country codes
+        # Look for patterns starting with +, 00, or country codes.
+        # Allow parentheses because LinkedIn often shows numbers like (+34) 94 452 15 10.
         phone_patterns = [
-            r'\+[\d\s\-]{7,20}',  # + followed by digits/spaces/dashes (international format)
-            r'00[\d\s\-]{7,20}',   # 00 followed by digits/spaces/dashes
-            r'\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,9}',  # Formatted number with spaces/dashes
+            r'\+[\d\s\-\(\)]{7,25}',   # + followed by digits/spaces/dashes/parentheses
+            r'00[\d\s\-\(\)]{7,25}',    # 00 followed by digits/spaces/dashes/parentheses
+            r'\d{1,4}[\s\-\(\)]?\d{1,4}[\s\-\(\)]?\d{1,4}[\s\-\(\)]?\d{1,4}[\s\-\(\)]?\d{1,4}[\s\-\(\)]?\d{1,4}[\s\-\(\)]?\d{1,9}',  # Formatted number with spaces/dashes/parentheses
         ]
         
         for pattern in phone_patterns:
@@ -391,8 +392,8 @@ class LinkedInScraper(BaseScraper):
         # Last resort: extract all digits and see if we have a valid phone number
         # But preserve + and 00 prefixes if they exist
         if '+' in cleaned_text or cleaned_text.strip().startswith('00'):
-            # Extract everything from + or 00 onwards, keeping digits, spaces, dashes
-            match = re.search(r'[+\d][\d\s\-]+', cleaned_text)
+            # Extract everything from + or 00 onwards, keeping digits, spaces, dashes, and parentheses
+            match = re.search(r'[+\d][\d\s\-\(\)]+', cleaned_text)
             if match:
                 phone_candidate = match.group(0).strip()
                 digits_only = re.sub(r'\D', '', phone_candidate)
@@ -549,7 +550,82 @@ class LinkedInScraper(BaseScraper):
         parts = text.split(",")
         if len(parts) > 1:
             last_part = parts[-1].strip()
-            # If it's a short string, might be country
+            last_part_lower = last_part.lower()
+
+            # Map common sub-regions/provinces to their country code
+            # This avoids treating provinces/states like "Vizcaya" or "California" as country names.
+            province_to_country = {
+                # Spain provinces and autonomous communities (partial, can be extended)
+                "vizcaya": "ES",
+                "bizkaia": "ES",
+                "madrid": "ES",
+                "barcelona": "ES",
+                "valencia": "ES",
+                "sevilla": "ES",
+                "seville": "ES",
+                "malaga": "ES",
+                "bilbao": "ES",
+                "guipuzcoa": "ES",
+                "gipuzkoa": "ES",
+                "alicante": "ES",
+                "zaragoza": "ES",
+                "murcia": "ES",
+
+                # United States states (abbreviated list of common ones seen on LinkedIn)
+                "california": "US",
+                "texas": "US",
+                "new york": "US",
+                "massachusetts": "US",
+                "washington": "US",
+                "illinois": "US",
+                "florida": "US",
+                "colorado": "US",
+                "georgia": "US",
+                "virginia": "US",
+                "new jersey": "US",
+                "north carolina": "US",
+                "pennsylvania": "US",
+                "ohio": "US",
+                "michigan": "US",
+                "connecticut": "US",
+
+                # Canada provinces (a few common ones)
+                "ontario": "CA",
+                "quebec": "CA",
+                "british columbia": "CA",
+                "alberta": "CA",
+
+                # United Kingdom nations / regions
+                "england": "UK",
+                "scotland": "UK",
+                "wales": "UK",
+                "northern ireland": "UK",
+
+                # Germany states (selection)
+                "bavaria": "DE",
+                "bayern": "DE",
+                "baden-wuerttemberg": "DE",
+                "baden-württemberg": "DE",
+                "berlin": "DE",
+                "hamburg": "DE",
+
+                # France regions (selection)
+                "ile-de-france": "FR",
+                "Île-de-france": "FR",
+                "provence-alpes-cote d'azur": "FR",
+                "auvergne-rhone-alpes": "FR",
+
+                # Italy regions (selection)
+                "lombardy": "IT",
+                "lombardia": "IT",
+                "lazio": "IT",
+                "piemonte": "IT",
+            }
+
+            if last_part_lower in province_to_country:
+                return province_to_country[last_part_lower]
+
+            # If it's a short string, might still be a country name we don't explicitly handle
             if len(last_part) <= 30:
                 return last_part
         
@@ -832,7 +908,7 @@ class LinkedInScraper(BaseScraper):
                                     break
                     except:
                         continue
-                
+
                 # Strategy 2: Search by text content pattern
                 if not phone_number:
                     page_text = await page.evaluate("() => document.body.innerText")
@@ -845,7 +921,7 @@ class LinkedInScraper(BaseScraper):
                                     if (text.toLowerCase().includes('phone')) {
                                         const parts = text.split(/phone/i);
                                         if (parts.length > 1) {
-                                            const value = parts[1].trim().split(/[\\n\\r]/)[0].trim();
+                                            const value = parts[1].trim().split(/[\n\r]/)[0].trim();
                                             // Check if it looks like a phone number (contains digits)
                                             if (value && /[0-9]/.test(value) && value.length >= 7) {
                                                 return value;
@@ -870,20 +946,53 @@ class LinkedInScraper(BaseScraper):
                             company_data["phone"] = phone_number
             except Exception as e:
                 logger.debug(f"Error finding phone number: {e}")
-            
+
+            # Extract contact email
+            try:
+                email = None
+                # Strategy 1: mailto: links (most reliable)
+                try:
+                    email_links = await page.query_selector_all("a[href^='mailto:']")
+                    for el in email_links:
+                        href = await el.get_attribute("href")
+                        if href and "@" in href:
+                            email_candidate = href.split(":", 1)[1].strip()
+                            email_candidate = email_candidate.split("?")[0].strip()
+                            if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_candidate):
+                                email = email_candidate
+                                break
+                except Exception:
+                    pass
+
+                # Strategy 2: plain-text email in About text
+                if not email:
+                    try:
+                        page_text = await page.evaluate("() => document.body.innerText")
+                        # Use a standard email regex: local-part @ domain . TLD
+                        match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", page_text)
+                        if match:
+                            email = match.group(0).strip()
+                    except Exception:
+                        pass
+
+                if email:
+                    company_data["email"] = email
+            except Exception as e:
+                logger.debug(f"Error finding email: {e}")
+
             # Extract country from phone number if available, otherwise from headquarters
             if phone_number:
                 country_from_phone = self.parse_country_from_phone(phone_number)
                 if country_from_phone:
                     company_data["country"] = country_from_phone
                     logger.debug(f"Extracted country from phone number: {country_from_phone}")
-            
+
             # Parse country from headquarters (if not already set from phone)
             if headquarters_text:
                 if not company_data.get("country"):
                     company_data["country"] = self.parse_country(headquarters_text)
                 company_data["headquarters"] = headquarters_text  # Keep full text for reference
-            
+
             # Set region based on country code (business territory, not geographic location)
             # Region should be EMEA, APAC, or Americas based on country
             if company_data.get("country"):
@@ -891,47 +1000,6 @@ class LinkedInScraper(BaseScraper):
                 if region:
                     company_data["region"] = region
                     logger.debug(f"Set region to {region} based on country {company_data['country']}")
-            
-            # Extract company type (should be "Type" field, NOT "Company size")
-            # This maps to the "type" field in the schema
-            company_type = None
-            try:
-                # Strategy 1: Look for "Type" field specifically (not Company size)
-                dt_elements = await page.query_selector_all("dt")
-                for dt_el in dt_elements:
-                    try:
-                        dt_text = (await dt_el.inner_text()).strip().lower()
-                        # Look for "Type" but NOT "Company size"
-                        if "type" in dt_text and "company size" not in dt_text and "size" not in dt_text:
-                            # Get the next dd element (sibling)
-                            dd_el = await dt_el.evaluate_handle("el => el.nextElementSibling")
-                            if dd_el and dd_el.as_element():
-                                company_type = (await dd_el.as_element().inner_text()).strip()
-                                if company_type:
-                                    break
-                    except:
-                        continue
-                
-                # Strategy 2: Use selector for Type field (but avoid Company size)
-                if not company_type:
-                    type_selectors = [
-                        "dt:has-text('Type') + dd",
-                        "div[data-test-id='org-type']",
-                    ]
-                    for selector in type_selectors:
-                        try:
-                            type_el = await page.query_selector(selector)
-                            if type_el:
-                                company_type = (await type_el.inner_text()).strip()
-                                # Make sure it's not a company size value (contains numbers or "employees")
-                                if company_type and not re.search(r'\d+.*employee', company_type, re.IGNORECASE):
-                                    break
-                                else:
-                                    company_type = None
-                        except:
-                            continue
-            except Exception as e:
-                logger.debug(f"Error finding company type: {e}")
             
             if company_type:
                 company_data["type"] = company_type
@@ -1249,7 +1317,7 @@ class LinkedInScraper(BaseScraper):
                         "linkedin_url": company_info.get("linkedin_url") or detailed_data.get("linkedin_url"),
                         "name": None,
                         "title": None,
-                        "email": None,
+                        "email": detailed_data.get("email"),
                         "phone": detailed_data.get("phone")  # Add phone to contact record
                     }
                     
