@@ -46,7 +46,7 @@ export default function ErpSync() {
     },
   })
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const pageSize = 9
 
   const totalItems = syncLogs?.length ?? 0
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
@@ -83,7 +83,7 @@ export default function ErpSync() {
       ) : !syncLogs || syncLogs.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">No ERP sync logs found</div>
       ) : (
-        <div className="border rounded-lg bg-card/60">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
@@ -99,7 +99,7 @@ export default function ErpSync() {
                   <TableCell className="font-medium">
                     <Link
                       to={`/companies/${log.company_id}`}
-                      className="text-primary hover:underline"
+                      className="text-white hover:underline"
                     >
                       {log.company_name || log.company_id}
                     </Link>
@@ -115,7 +115,8 @@ export default function ErpSync() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleSync(log.company_id)}
-                      disabled={syncMutation.isPending}
+                      disabled={syncMutation.isPending}                       
+                      className='bg-transparent'
                     >
                       Re-sync
                     </Button>
@@ -124,7 +125,7 @@ export default function ErpSync() {
               ))}
             </TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
             <span>
               Showing <span className="font-medium">{start + 1}</span>–
               <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}

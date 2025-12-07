@@ -34,7 +34,7 @@ export default function Contacts() {
       ) : !contacts || contacts.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">No contacts found</div>
       ) : (
-        <div className="border rounded-lg bg-card/60">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
@@ -55,7 +55,7 @@ export default function Contacts() {
                   <TableCell>
                     <Link
                       to={`/companies/${contact.company_id}`}
-                      className="text-primary hover:underline"
+                      className="text-white hover:underline"
                     >
                       {(contact as any).company?.name || 'View Company'}
                     </Link>
@@ -73,14 +73,14 @@ export default function Contacts() {
                   </TableCell>
                   <TableCell>
                     <Link to={`/contacts/${contact.id}`}>
-                      <Button variant="outline" size="sm">View</Button>
+                      <Button variant="outline" className='bg-transparent' size="sm">View</Button>
                     </Link>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
             <span>
               Showing <span className="font-medium">{start + 1}</span>–
               <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}

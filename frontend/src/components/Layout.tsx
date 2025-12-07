@@ -37,16 +37,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
-      <div className="flex min-h-screen max-w-7xl mx-auto px-4 lg:px-6">
+      <div className="flex min-h-screen w-full mx-auto px-4 lg:px-6">
         {/* Sidebar */}
-        <div className="relative hidden md:flex w-64 flex-col py-6 pr-4">
+        <div className="relative hidden md:flex w-64 flex-col py-6 pr-4 min-w-[350px]">
           <div className="relative flex-1 rounded-2xl border border-white/10 bg-slate-900/70 shadow-[0_20px_60px_rgba(15,23,42,0.9)] backdrop-blur-2xl overflow-hidden">
             <div className="pointer-events-none absolute inset-px rounded-[1.05rem] border border-white/10/60" />
             <div className="flex h-full flex-col">
               <div className="px-5 pt-4 pb-5 border-b border-white/5">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <h1 className="text-sm font-semibold tracking-tight">
+                    <h1 className="text-lg font-semibold tracking-tight">
                       F4F + FiGGYZ CRM
                     </h1>
                     <p className="mt-1 text-[0.7rem] uppercase tracking-[0.16em] text-slate-400">

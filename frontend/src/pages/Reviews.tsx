@@ -47,10 +47,11 @@ export default function Reviews() {
           value={filters.assigned_to}
           onChange={(e) =>
             setFilters({ ...filters, assigned_to: e.target.value })
-          }
+          }                      
+          className='bg-card/20 text-foreground'
         />
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm bg-card/20 text-foreground"
           value={filters.outcome}
           onChange={(e) => setFilters({ ...filters, outcome: e.target.value })}
         >
@@ -65,7 +66,8 @@ export default function Reviews() {
           type="date"
           placeholder="Date"
           value={filters.date}
-          onChange={(e) => setFilters({ ...filters, date: e.target.value })}
+          onChange={(e) => setFilters({ ...filters, date: e.target.value })}                        
+          className='bg-card/20 text-foreground'
         />
       </div>
 
@@ -84,7 +86,7 @@ export default function Reviews() {
       ) : !reviews || reviews.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">No interaction reviews found</div>
       ) : (
-        <div className="border rounded-lg bg-card/60">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
@@ -132,14 +134,14 @@ export default function Reviews() {
                   <TableCell>{review.assigned_to || '-'}</TableCell>
                   <TableCell>
                     <Link to={`/reviews/${review.id}`}>
-                      <Button variant="outline" size="sm">Review</Button>
+                      <Button variant="outline" size="sm" className='bg-transparent'>Review</Button>
                     </Link>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
             <span>
               Showing <span className="font-medium">{start + 1}</span>–
               <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}

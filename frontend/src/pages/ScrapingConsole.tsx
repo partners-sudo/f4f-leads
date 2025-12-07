@@ -425,7 +425,7 @@ function ScrapingConsole() {
                   onChange={(e) => setCompetitorBrands(e.target.value)}
                 />
                 <button
-                  className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
+                  className="inline-flex items-center rounded-md bg-gradient-to-r from-emerald-400 via-sky-400 to-indigo-400 px-3 py-1.5 text-xs font-medium text-slate-950 shadow-[0_12px_30px_rgba(15,23,42,0.9)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={handleStartCompetitors}
                   disabled={!competitorBrands.trim() || loading}
                 >
@@ -540,7 +540,7 @@ function ScrapingConsole() {
                   </div>
                 )}
                 <button
-                  className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
+                  className="inline-flex items-center rounded-md bg-gradient-to-r from-emerald-400 via-sky-400 to-indigo-400 px-3 py-1.5 text-xs font-medium text-slate-950 shadow-[0_12px_30px_rgba(15,23,42,0.9)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={handleStartCsv}
                   disabled={!csvPath.trim() || loading}
                 >

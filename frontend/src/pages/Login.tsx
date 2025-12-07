@@ -39,7 +39,7 @@ export default function Login() {
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-6xl grid gap-10 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] items-center">
         <div className="hidden md:flex flex-col gap-6 text-slate-100">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[0.7rem] font-medium tracking-[0.16em] uppercase backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-24 font-medium tracking-[0.16em] uppercase backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
             F4F + FiGGYZ CRM
           </span>

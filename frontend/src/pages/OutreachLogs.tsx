@@ -21,7 +21,7 @@ export default function OutreachLogs() {
 
   const { data: logs, isLoading, error } = useOutreachLogs(filters)
   const [page, setPage] = useState(1)
-  const pageSize = 6
+  const pageSize = 8
 
   const totalItems = logs?.length ?? 0
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
@@ -55,14 +55,16 @@ export default function OutreachLogs() {
           placeholder="Stage (0, 1, 2)"
           value={filters.stage}
           onChange={(e) => setFilters({ ...filters, stage: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
         <Input
           placeholder="Brand"
           value={filters.brand}
           onChange={(e) => setFilters({ ...filters, brand: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-md border border-input bg-card/20 text-foreground px-3 py-2 text-sm"
           value={filters.status}
           onChange={(e) => setFilters({ ...filters, status: e.target.value })}
         >
@@ -78,12 +80,14 @@ export default function OutreachLogs() {
           placeholder="From Date"
           value={filters.dateFrom}
           onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
         <Input
           type="date"
           placeholder="To Date"
           value={filters.dateTo}
           onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
       </div>
 
@@ -104,7 +108,7 @@ export default function OutreachLogs() {
           </p>
         </div>
       ) : (
-        <div className="border rounded-lg bg-card/60">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
@@ -161,7 +165,7 @@ export default function OutreachLogs() {
               ))}
             </TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
             <span>
               Showing <span className="font-medium">{start + 1}</span>–
               <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}

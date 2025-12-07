@@ -65,19 +65,22 @@ export default function Companies() {
           placeholder="Region"
           value={filters.region}
           onChange={(e) => setFilters({ ...filters, region: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
         <Input
           placeholder="Country"
           value={filters.country}
           onChange={(e) => setFilters({ ...filters, country: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
         <Input
           placeholder="Brand Focus"
           value={filters.brand_focus}
           onChange={(e) => setFilters({ ...filters, brand_focus: e.target.value })}
+          className='bg-card/20 text-foreground'
         />
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-md border border-input bg-card/20 text-foreground px-3 py-2 text-sm"
           value={filters.status}
           onChange={(e) => setFilters({ ...filters, status: e.target.value })}
         >
@@ -88,7 +91,7 @@ export default function Companies() {
           <option value="cold">Cold</option>
         </select>
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-md border border-input bg-card/20 text-foreground px-3 py-2 text-sm"
           value={filters.source}
           onChange={(e) => setFilters({ ...filters, source: e.target.value })}
         >
@@ -115,7 +118,7 @@ export default function Companies() {
           </p>
         </div>
       ) : (
-        <div className="border rounded-lg bg-card/60">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
@@ -150,14 +153,14 @@ export default function Companies() {
                   </TableCell>
                   <TableCell>
                     <Link to={`/companies/${company.id}`}>
-                      <Button variant="outline" size="sm">View</Button>
+                      <Button variant="outline" className='bg-transparent' size="sm">View</Button>
                     </Link>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
             <span>
               Showing <span className="font-medium">{start + 1}</span>–
               <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}

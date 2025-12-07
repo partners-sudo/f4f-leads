@@ -47,7 +47,7 @@ export default function Templates() {
     },
   })
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const pageSize = 9
 
   const totalItems = templates?.length ?? 0
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
@@ -265,7 +265,7 @@ export default function Templates() {
       ) : !templates || templates.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">No templates found</div>
       ) : (
-        <div className="border rounded-lg bg-card/60">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
@@ -291,6 +291,7 @@ export default function Templates() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleEdit(template)}
+                        className='bg-transparent'
                       >
                         Edit
                       </Button>
@@ -306,6 +307,7 @@ export default function Templates() {
                             deleteMutation.mutate(template.id)
                           }
                         }}
+                        className='bg-transparent'
                       >
                         Delete
                       </Button>
@@ -315,7 +317,7 @@ export default function Templates() {
               ))}
             </TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground bg-background/40">
+          <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
             <span>
               Showing <span className="font-medium">{start + 1}</span>–
               <span className="font-medium">{Math.min(end, totalItems)}</span> of{' '}
