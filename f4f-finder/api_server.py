@@ -183,8 +183,10 @@ async def stream_competitors(brands: str, request: Request):
             payload = json.dumps(result)
             yield f"event: result\ndata: {payload}\n\n"
         except asyncio.CancelledError:
+            # Task was cancelled (for example via the /scrape/competitors/cancel endpoint).
+            # Ensure the task is cancelled but stop the stream quietly without raising.
             task.cancel()
-            raise
+            return
         finally:
             RUN_TASKS.pop(run_id, None)
 
@@ -247,8 +249,10 @@ async def stream_linkedin(keyword: str, request: Request):
             payload = json.dumps(result)
             yield f"event: result\ndata: {payload}\n\n"
         except asyncio.CancelledError:
+            # Task was cancelled (for example via the /scrape/linkedin/cancel endpoint).
+            # Ensure the task is cancelled but stop the stream quietly without raising.
             task.cancel()
-            raise
+            return
         finally:
             RUN_TASKS.pop(run_id, None)
 
@@ -362,8 +366,10 @@ async def stream_csv(request: Request, file_path: str, source: str | None = None
             payload = json.dumps(result)
             yield f"event: result\ndata: {payload}\n\n"
         except asyncio.CancelledError:
+            # Task was cancelled (for example via the /scrape/csv/cancel endpoint).
+            # Ensure the task is cancelled but stop the stream quietly without raising.
             task.cancel()
-            raise
+            return
         finally:
             RUN_TASKS.pop(run_id, None)
 
@@ -390,6 +396,11 @@ async def cancel_competitors(payload: CancelRequest):
 
 @app.post("/scrape/csv/cancel")
 async def cancel_csv(payload: CancelRequest):
+    # Log immediately so the user sees that a cancel was requested for this run
+    logging.getLogger("finder").info(
+        f"CSV/PDF cancel requested for run_id={payload.run_id}"
+    )
+
     request_cancel(payload.run_id)
     task = RUN_TASKS.pop(payload.run_id, None)
     if task is not None:

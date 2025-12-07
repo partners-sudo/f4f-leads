@@ -358,7 +358,10 @@ def _process_shop_csv_impl(
         companies_saved = 0
         contacts_saved = 0
         errors = 0
-        
+
+        # Avoid log spam while paused by tracking when we last logged the pause message
+        last_pause_log_ts: float | None = None
+
         # Step 2: Process each shop
         for idx, shop in enumerate(shops, 1):
             if is_cancelled(run_id):
@@ -367,8 +370,17 @@ def _process_shop_csv_impl(
 
             # Cooperative pause: allow user to temporarily halt processing
             while is_paused(run_id) and not is_cancelled(run_id):
-                logger.info("CSV/PDF processing paused by user, waiting to resume...")
+                now = time.time()
+                # Log at most once every 5 seconds while paused to avoid flooding logs
+                if last_pause_log_ts is None or (now - last_pause_log_ts) >= 5.0:
+                    logger.info("CSV/PDF processing paused by user, waiting to resume...")
+                    last_pause_log_ts = now
                 time.sleep(1.0)
+
+            # If a cancel was requested while we were paused, stop before doing any more work
+            if is_cancelled(run_id):
+                logger.info("CSV/PDF processing cancelled by user while paused, stopping early.")
+                break
             try:
                 shop_name = shop.get('name')
                 shop_address = shop.get('address')
