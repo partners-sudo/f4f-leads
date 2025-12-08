@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ScrapeResult } from '@/lib/finder'
-import { FINDER_BASE_URL, finderApi } from '@/lib/finder'
+import { FINDER_BASE_URL } from '@/lib/finder'
 
 function ScrapingConsole() {
   const [linkedinKeyword, setLinkedinKeyword] = useState('retail buyer')
   const [competitorBrands, setCompetitorBrands] = useState('Funko, Tubbz, Cable guys')
   const [csvPath, setCsvPath] = useState('')
-  const [csvSource, setCsvSource] = useState('csv_upload')
+  const csvSource = 'csv_upload'
 
   const [activeTab, setActiveTab] = useState<'linkedin' | 'competitors' | 'csv'>('linkedin')
 

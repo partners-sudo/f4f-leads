@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { supabase, type Company } from '@/lib/supabase'
 
 export function useCompanies(filters?: {

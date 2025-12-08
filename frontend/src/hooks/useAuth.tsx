@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { useNavigate } from 'react-router-dom'
 
 type Session = Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']
 

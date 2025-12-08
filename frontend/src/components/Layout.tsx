@@ -20,7 +20,6 @@ const navigation = [
   { name: 'Outreach Logs', href: '/outreach', icon: Mail },
   { name: 'Reviews', href: '/reviews', icon: MessageSquare },
   { name: 'Templates', href: '/templates', icon: FileText },
-  { name: 'Merge Candidates', href: '/merge', icon: GitMerge },
   { name: 'ERP Sync', href: '/erp-sync', icon: Settings },
   { name: 'Scraping', href: '/scraping', icon: FileText },
 ]
