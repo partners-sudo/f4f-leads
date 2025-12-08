@@ -8,7 +8,6 @@ import {
   Mail,
   MessageSquare,
   FileText,
-  GitMerge,
   Settings,
   LogOut,
 } from 'lucide-react'
